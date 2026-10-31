@@ -174,10 +174,18 @@ export function groupOfClass(className: string | null, groups: GroupDef[]): stri
   return "other_invertebrates";
 }
 
+/** GET JSON from GBIF; one automatic retry after a dropped connection, 429 or 5xx (404s are real answers). */
 async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
-  const r = await fetch(url, { signal });
-  if (!r.ok) throw new Error(`GBIF API ${r.status}`);
-  return r.json();
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const r = await fetch(url, { signal });
+      if (r.ok) return r.json();
+      if (attempt > 0 || (r.status !== 429 && r.status < 500)) throw new Error(`GBIF API ${r.status}`);
+    } catch (e) {
+      if (signal?.aborted || attempt > 0 || !(e instanceof TypeError)) throw e;
+    }
+    await new Promise((res) => setTimeout(res, 1500));
+  }
 }
 
 export interface LiveResult {
