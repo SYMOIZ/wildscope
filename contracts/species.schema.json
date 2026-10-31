@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WildScope species file (A-03)",
+  "type": "object",
+  "required": ["schemaVersion", "speciesKey", "scientificName", "canonicalName", "lens", "group", "taxonomy", "conservation", "sensitive", "records", "cells", "taxonUrl"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "speciesKey": { "type": "string", "pattern": "^[0-9A-Za-z]{1,16}$" },
+    "scientificName": { "type": "string" },
+    "canonicalName": { "type": "string" },
+    "vernacularNames": { "type": "array", "items": { "type": "object", "required": ["name", "lang"] } },
+    "lens": { "enum": ["animals", "trees"] },
+    "group": { "type": "string" },
+    "conservation": {
+      "type": "object",
+      "required": ["category", "source", "assessmentYear"],
+      "properties": {
+        "category": { "enum": ["LC", "NT", "VU", "EN", "CR", "EW", "EX", "DD", "NE", null] },
+        "source": { "enum": ["gbif-field", "iucn-api", null] },
+        "assessmentYear": { "type": ["integer", "null"] }
+      }
+    },
+    "sensitive": { "type": "boolean" },
+    "records": {
+      "type": "object",
+      "required": ["total", "earliestYear", "latestYear", "byBin", "licence", "topCountries"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 1 },
+        "byBin": { "type": "array", "minItems": 9, "maxItems": 9, "items": { "type": "integer", "minimum": 0 } },
+        "topCountries": { "type": "array", "maxItems": 5 }
+      }
+    },
+    "cells": {
+      "type": "object",
+      "required": ["res", "cells"],
+      "properties": {
+        "res": { "const": 4 },
+        "cells": {
+          "type": "array",
+          "items": {
+            "type": "array", "minItems": 2, "maxItems": 2,
+            "prefixItems": [
+              { "type": "string", "pattern": "^[0-9a-f]{15}$" },
+              { "type": "array", "minItems": 9, "maxItems": 9, "items": { "type": "integer", "minimum": 0 } }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

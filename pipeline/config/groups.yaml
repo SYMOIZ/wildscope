@@ -1,0 +1,35 @@
+# Animal groups (DATA_ARCHITECTURE §5.1). Versioned: bump `version` when rules change.
+# Matching is on the GBIF backbone `class` value. Any Animalia record whose class is not
+# listed falls into `other_invertebrates`, EXCEPT chordate classes, which must be listed
+# explicitly (otherwise the build fails if they hold >= 0.01% of kept records).
+version: 1
+lens: animals
+groups:
+  - id: mammals
+    label: Mammals
+    classes: [Mammalia]
+  - id: birds
+    label: Birds
+    classes: [Aves]
+  - id: reptiles
+    label: Reptiles
+    classes: [Reptilia, Squamata, Testudines, Crocodylia]
+  - id: amphibians
+    label: Amphibians
+    classes: [Amphibia]
+  - id: fishes
+    label: Fishes
+    note: Fishes (grouped) is a functional grouping, not a clade.
+    # The 2026 GBIF backbone uses Teleostei (and other actinopterygian subclasses) as classes;
+    # found by the step-0 class inventory on snapshot 2026-10-01.
+    classes: [Actinopterygii, Actinopteri, Teleostei, Holostei, Chondrostei, Cladistia,
+              Elasmobranchii, Holocephali, Chondrichthyes, Sarcopterygii,
+              Dipneusti, Coelacanthi, Myxini, Petromyzonti, Cephalaspidomorphi]
+  - id: insects
+    label: Insects
+    classes: [Insecta]
+  - id: other_invertebrates
+    label: Other invertebrates
+    catch_all: true
+    # Non-vertebrate chordates are grouped here on purpose (tunicates, lancelets).
+    chordate_classes: [Ascidiacea, Thaliacea, Appendicularia, Leptocardii]

@@ -1,0 +1,119 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  WildScope full-snapshot data build (DATA_ARCHITECTURE §7, UD-07 default: one memory-optimised
+  EC2 instance in us-east-1, next to the GBIF bucket). The instance clones the repository, runs
+  pipeline steps 0-4 and 8-10, publishes to the data bucket and terminates itself. Delete the
+  stack afterwards. Progress: CloudWatch log group /wildscope/<env>/build-job.
+
+Parameters:
+  Env:
+    Type: String
+    Default: prod
+  RepoUrl:
+    Type: String
+    Description: Public HTTPS git URL of this repository.
+  RepoRef:
+    Type: String
+    Default: main
+  Snapshot:
+    Type: String
+    Default: latest
+  DataBucketName:
+    Type: String
+  DistributionId:
+    Type: String
+  InstanceType:
+    Type: String
+    Default: r6id.4xlarge
+    Description: 128 GiB RAM and local NVMe for DuckDB spill. Measure and adjust (UD-07).
+  MaxHours:
+    Type: Number
+    Default: 8
+    Description: Hard stop; the instance shuts down (and terminates) after this many hours.
+  LatestAmi:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/wildscope/${Env}/build-job"
+      RetentionInDays: 14
+
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: publish-data
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [s3:PutObject]
+                Resource: !Sub "arn:aws:s3:::${DataBucketName}/data/v1/*"
+              - Effect: Allow
+                Action: [cloudfront:CreateInvalidation]
+                Resource: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${DistributionId}"
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents, logs:DescribeLogStreams]
+                Resource: !Sub "${LogGroup.Arn}:*"
+
+  Profile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref Role]
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmi
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref Profile
+      InstanceInitiatedShutdownBehavior: terminate
+      MetadataOptions: { HttpTokens: required }
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: { VolumeSize: 60, VolumeType: gp3, DeleteOnTermination: true, Encrypted: true }
+      Tags:
+        - { Key: Name, Value: !Sub "wildscope-${Env}-build" }
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+          shutdown -h +$(( ${MaxHours} * 60 ))
+          exec > >(tee /var/log/wildscope-build.log) 2>&1
+          dnf install -y git python3.12 python3.12-pip amazon-cloudwatch-agent
+          cat > /opt/cw.json <<'CW'
+          {"logs":{"logs_collected":{"files":{"collect_list":[{"file_path":"/var/log/wildscope-build.log","log_group_name":"/wildscope/${Env}/build-job","log_stream_name":"{instance_id}"}]}}}}
+          CW
+          /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/cw.json -s
+          # Local NVMe (if the instance type has one) for the work directory.
+          DEV=$(lsblk -dpno NAME,MODEL | awk '/Instance Storage/ {print $1; exit}')
+          mkdir -p /work
+          if [ -n "$DEV" ]; then mkfs.xfs -f "$DEV" && mount "$DEV" /work; fi
+          cd /work
+          git clone --depth 1 --branch "${RepoRef}" "${RepoUrl}" repo
+          cd repo
+          python3.12 -m venv .venv
+          .venv/bin/pip install -q -r pipeline/requirements.txt
+          mkdir -p /work/pipeline-work && ln -sfn /work/pipeline-work pipeline/work
+          .venv/bin/python -u -m pipeline.wildscope.build all --snapshot "${Snapshot}" --threads 16 --parallel 32 --names coldp
+          .venv/bin/python -u -m pipeline.wildscope.build publish --bucket "${DataBucketName}" --distribution "${DistributionId}"
+          echo "WILDSCOPE BUILD DONE"
+          sleep 60
+          shutdown -h now
+
+Outputs:
+  InstanceId:
+    Value: !Ref Instance
+  LogGroup:
+    Value: !Ref LogGroup

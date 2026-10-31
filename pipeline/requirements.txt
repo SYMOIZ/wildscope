@@ -1,0 +1,6 @@
+duckdb==2.0.0
+h3==4.5.0
+PyYAML>=6.0
+jsonschema>=4.23
+brotli>=1.1
+boto3>=1.35

@@ -1,0 +1,5 @@
+# Manually maintained sensitive species (DATA_ARCHITECTURE §9, rule 2).
+# Each entry: speciesKey (string) and a reason. Empty in this release.
+# Rule 1 (share of records with `datageneralizations`) cannot be applied: that column is
+# not present in the GBIF AWS snapshot schema (verified in step 0, see schema.json).
+species: []

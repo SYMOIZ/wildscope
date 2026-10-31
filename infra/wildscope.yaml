@@ -1,0 +1,361 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >-
+  WildScope (contest cut): private S3 buckets behind CloudFront with OAC, an HTTP API with one
+  Lambda for place search (Amazon Location Service Places v2), an Amazon Location API key for
+  basemap tiles, a CloudWatch alarm and a monthly AWS Budget. Deploy in us-east-1.
+
+Parameters:
+  Env:
+    Type: String
+    Default: prod
+    AllowedPattern: "^[a-z0-9-]{2,12}$"
+  DatasetId:
+    Type: String
+    Default: unknown
+    Description: Dataset id reported by the API (pipeline/out/last_build.json).
+  BudgetEmail:
+    Type: String
+    Description: Email address that receives budget alerts.
+    AllowedPattern: "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+  MonthlyBudgetUsd:
+    Type: Number
+    Default: 20
+    MinValue: 1
+    Description: Monthly cost ceiling (NFR-10). Alerts at 50%, 80% and 100% of actual cost.
+  PlacesAttribution:
+    Type: String
+    Default: "Place search: Amazon Location Service. Data provider terms apply."
+
+Conditions:
+  InUsEast1: !Equals [!Ref "AWS::Region", us-east-1]
+
+Rules:
+  RegionIsUsEast1:
+    Assertions:
+      - Assert: !Equals [!Ref "AWS::Region", us-east-1]
+        AssertDescription: Deploy in us-east-1 (next to the GBIF data, and where the CSP allows Amazon Location tiles).
+
+Resources:
+  # ---------------------------------------------------------------- storage
+  AppBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration: { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+      BucketEncryption: { ServerSideEncryptionConfiguration: [{ ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 } }] }
+      OwnershipControls: { Rules: [{ ObjectOwnership: BucketOwnerEnforced }] }
+      VersioningConfiguration: { Status: Enabled }
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-versions
+            Status: Enabled
+            NoncurrentVersionExpiration: { NoncurrentDays: 30 }
+
+  DataBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration: { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+      BucketEncryption: { ServerSideEncryptionConfiguration: [{ ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 } }] }
+      OwnershipControls: { Rules: [{ ObjectOwnership: BucketOwnerEnforced }] }
+
+  BuildBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration: { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+      BucketEncryption: { ServerSideEncryptionConfiguration: [{ ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 } }] }
+      OwnershipControls: { Rules: [{ ObjectOwnership: BucketOwnerEnforced }] }
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-intermediates
+            Status: Enabled
+            ExpirationInDays: 30
+
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "wildscope-${Env}-oac"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  AppBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AppBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: CloudFrontReadOnly
+            Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub "${AppBucket.Arn}/*"
+            Condition: { StringEquals: { "AWS:SourceArn": !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}" } }
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource: [!GetAtt AppBucket.Arn, !Sub "${AppBucket.Arn}/*"]
+            Condition: { Bool: { "aws:SecureTransport": "false" } }
+
+  DataBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref DataBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: CloudFrontReadOnly
+            Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub "${DataBucket.Arn}/*"
+            Condition: { StringEquals: { "AWS:SourceArn": !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}" } }
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource: [!GetAtt DataBucket.Arn, !Sub "${DataBucket.Arn}/*"]
+            Condition: { Bool: { "aws:SecureTransport": "false" } }
+
+  # ---------------------------------------------------------------- distribution
+  SecurityHeaders:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub "wildscope-${Env}-headers"
+        SecurityHeadersConfig:
+          # Must equal web/src/csp.ts (checked by `make check`).
+          ContentSecurityPolicy:
+            Override: true
+            ContentSecurityPolicy: "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://maps.geo.us-east-1.amazonaws.com; connect-src 'self' https://maps.geo.us-east-1.amazonaws.com; worker-src 'self' blob:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+          StrictTransportSecurity: { Override: true, AccessControlMaxAgeSec: 31536000, IncludeSubdomains: true }
+          ContentTypeOptions: { Override: true }
+          ReferrerPolicy: { Override: true, ReferrerPolicy: strict-origin-when-cross-origin }
+          FrameOptions: { Override: true, FrameOption: DENY }
+        CustomHeadersConfig:
+          Items:
+            - { Header: Permissions-Policy, Value: "camera=(), microphone=(), geolocation=(), payment=()", Override: true }
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub "WildScope ${Env}"
+        Enabled: true
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        PriceClass: PriceClass_100
+        DefaultRootObject: index.html
+        Origins:
+          - Id: app
+            DomainName: !GetAtt AppBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt OriginAccessControl.Id
+            S3OriginConfig: { OriginAccessIdentity: "" }
+          - Id: data
+            DomainName: !GetAtt DataBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt OriginAccessControl.Id
+            S3OriginConfig: { OriginAccessIdentity: "" }
+          - Id: api
+            DomainName: !Sub "${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+            CustomOriginConfig: { OriginProtocolPolicy: https-only, OriginSSLProtocols: [TLSv1.2] }
+        DefaultCacheBehavior:
+          TargetOriginId: app
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # Managed-CachingOptimized
+          ResponseHeadersPolicyId: !Ref SecurityHeaders
+        CacheBehaviors:
+          - PathPattern: /data/*
+            TargetOriginId: data
+            ViewerProtocolPolicy: redirect-to-https
+            Compress: false # objects are stored pre-compressed (brotli / gzip) with Content-Encoding
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # Managed-CachingOptimized (honours Cache-Control)
+            ResponseHeadersPolicyId: !Ref SecurityHeaders
+          - PathPattern: /api/*
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            Compress: true
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # Managed-CachingDisabled (geo results: no-store)
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # Managed-AllViewerExceptHostHeader
+            ResponseHeadersPolicyId: !Ref SecurityHeaders
+
+  # ---------------------------------------------------------------- API
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/wildscope/${Env}/api-access"
+      RetentionInDays: 14
+
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub "wildscope-${Env}"
+      ProtocolType: HTTP
+      # The app calls the API same-origin through CloudFront; CORS is only for local development.
+      CorsConfiguration:
+        AllowOrigins: ["http://localhost:5173"]
+        AllowMethods: [GET]
+        AllowHeaders: [content-type]
+        MaxAge: 600
+
+  ApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: $default
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 50
+        ThrottlingRateLimit: 25
+      AccessLogSettings:
+        DestinationArn: !GetAtt ApiLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","routeKey":"$context.routeKey","status":"$context.status","latency":"$context.responseLatency","integrationError":"$context.integrationErrorMessage"}'
+
+  GeoFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/wildscope-${Env}-geo"
+      RetentionInDays: 14
+
+  GeoFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: logs-and-places
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub "${GeoFunctionLogGroup.Arn}:*"
+              - Effect: Allow
+                Action: [geo-places:SearchText]
+                Resource: !Sub "arn:aws:geo-places:${AWS::Region}::provider/default"
+
+  GeoFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: GeoFunctionLogGroup
+    Properties:
+      FunctionName: !Sub "wildscope-${Env}-geo"
+      CodeUri: ../lambda/geo/
+      Handler: handler.handler
+      Runtime: python3.12
+      Architectures: [arm64]
+      MemorySize: 512
+      Timeout: 10
+      Role: !GetAtt GeoFunctionRole.Arn
+      Environment:
+        Variables:
+          DATASET_ID: !Ref DatasetId
+          PLACES_ATTRIBUTION: !Ref PlacesAttribution
+
+  GeoIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt GeoFunction.Arn
+      PayloadFormatVersion: "2.0"
+      TimeoutInMillis: 10000
+
+  HealthRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: GET /api/v1/health
+      Target: !Sub "integrations/${GeoIntegration}"
+
+  GeoSearchRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: GET /api/v1/geo/search
+      Target: !Sub "integrations/${GeoIntegration}"
+
+  GeoInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GeoFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*"
+
+  # ---------------------------------------------------------------- Amazon Location (basemap tiles)
+  MapsApiKey:
+    Type: AWS::Location::APIKey
+    Properties:
+      KeyName: !Sub "wildscope-${Env}-maps"
+      Description: Browser key for Amazon Location Maps tiles only, restricted to the site referrer.
+      NoExpiry: true
+      Restrictions:
+        AllowActions: ["geo-maps:GetTile"]
+        AllowResources: [!Sub "arn:aws:geo-maps:${AWS::Region}::provider/default"]
+        AllowReferers:
+          - !Sub "https://${Distribution.DomainName}/*"
+          - "http://localhost:5173/*"
+          - "http://localhost:4173/*"
+
+  # ---------------------------------------------------------------- observability and cost
+  ApiErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "wildscope-${Env}-api-5xx"
+      AlarmDescription: API returned 5xx responses in 3 of the last 5 minutes.
+      Namespace: AWS/ApiGateway
+      MetricName: 5xx
+      Dimensions:
+        - { Name: ApiId, Value: !Ref HttpApi }
+        - { Name: Stage, Value: $default }
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 5
+      DatapointsToAlarm: 3
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  MonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Condition: InUsEast1
+    Properties:
+      Budget:
+        BudgetName: !Sub "wildscope-${Env}-monthly"
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit: { Amount: !Ref MonthlyBudgetUsd, Unit: USD }
+      NotificationsWithSubscribers:
+        - Notification: { NotificationType: ACTUAL, ComparisonOperator: GREATER_THAN, Threshold: 50, ThresholdType: PERCENTAGE }
+          Subscribers: [{ SubscriptionType: EMAIL, Address: !Ref BudgetEmail }]
+        - Notification: { NotificationType: ACTUAL, ComparisonOperator: GREATER_THAN, Threshold: 80, ThresholdType: PERCENTAGE }
+          Subscribers: [{ SubscriptionType: EMAIL, Address: !Ref BudgetEmail }]
+        - Notification: { NotificationType: ACTUAL, ComparisonOperator: GREATER_THAN, Threshold: 100, ThresholdType: PERCENTAGE }
+          Subscribers: [{ SubscriptionType: EMAIL, Address: !Ref BudgetEmail }]
+
+Outputs:
+  SiteUrl:
+    Value: !Sub "https://${Distribution.DomainName}"
+  DistributionId:
+    Value: !Ref Distribution
+  AppBucketName:
+    Value: !Ref AppBucket
+  DataBucketName:
+    Value: !Ref DataBucket
+  BuildBucketName:
+    Value: !Ref BuildBucket
+  MapsApiKeyName:
+    Value: !Ref MapsApiKey
+  ApiEndpoint:
+    Value: !GetAtt HttpApi.ApiEndpoint

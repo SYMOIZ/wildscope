@@ -1,0 +1,16 @@
+.venv/
+node_modules/
+pipeline/work/
+pipeline/cache/
+pipeline/out/
+web/dist/
+web/public/config.json
+.build/
+*.duckdb
+*.duckdb.wal
+__pycache__/
+.env
+.npm1.log
+pipeline/build-*.log
+.claude/settings.local.json
+*.tsbuildinfo
