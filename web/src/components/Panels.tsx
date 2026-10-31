@@ -447,8 +447,8 @@ export function ViewPanel() {
           )}
           <FacetList title="Records by class" facets={f.classes} kind="class" />
           <p className="caption muted">
-            Counts are from GBIF's live index today, using the same licence, coordinate and basis filters as the snapshot, and records with
-            coordinate uncertainty up to 10 km. They differ from snapshot figures and are not numbers of animals.
+            Counts are from GBIF's live index today, with the same licence, presence, coordinate and basis filters as the snapshot, and
+            coordinate uncertainty unknown or at most 10 km.{f.overMaxUncertainty > 0 && ` The breakdowns below still include ${fmtExact(f.overMaxUncertainty)} records that state more than 10 km.`} They differ from snapshot figures and are not numbers of animals.
           </p>
         </>
       )}

@@ -100,6 +100,8 @@ describe("live GBIF queries", () => {
     expect(p.getAll("taxonKey")).toEqual(["212"]);
     expect(p.get("year")).toBe("1990,1999");
     expect(p.get("decimalLatitude")).toBe("31.4000,31.7000");
+    // GBIF interval filters drop records without a value; the 10 km rule is applied client-side instead.
+    expect(p.has("coordinateUncertaintyInMeters")).toBe(false);
   });
   it("use OR'd class keys for grouped classes and the species key in species mode", () => {
     const b = { west: 0, south: 0, east: 1, north: 1 };

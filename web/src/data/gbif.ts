@@ -31,8 +31,13 @@ const BASE_FILTERS: [string, string][] = [
   ["basisOfRecord", "OBSERVATION"],
   ["basisOfRecord", "PRESERVED_SPECIMEN"],
   ["basisOfRecord", "MACHINE_OBSERVATION"],
-  ["coordinateUncertaintyInMeters", "0,10000"],
 ];
+
+/** F8 in the build keeps records with unknown uncertainty or at most 10 km. GBIF interval filters drop records
+ * without a value (most observations in many regions), so the API is queried without it; records stating more
+ * than 10 km are removed client-side and subtracted from totals using this interval. */
+export const MAX_UNCERTAINTY_M = 10_000;
+const OVER_MAX_UNCERTAINTY = `${MAX_UNCERTAINTY_M + 0.001},*`;
 
 export interface Bbox {
   west: number;
@@ -181,15 +186,27 @@ export interface LiveResult {
   fetchedAt: string;
 }
 
+async function countOverMaxUncertainty(q: LiveQuery, signal?: AbortSignal): Promise<number> {
+  const p = liveParams(q);
+  p.set("limit", "0");
+  p.set("coordinateUncertaintyInMeters", OVER_MAX_UNCERTAINTY);
+  return (await getJson<{ count: number }>(`${GBIF_API}/occurrence/search?${p}`, signal)).count;
+}
+
 export async function fetchRecordsInView(q: LiveQuery, groups: GroupDef[], signal?: AbortSignal): Promise<LiveResult> {
   const p = liveParams(q);
   p.set("limit", String(LIVE_PAGE));
-  const body = await getJson<{ count: number; results: unknown[] }>(`${GBIF_API}/occurrence/search?${p}`, signal);
-  let records = body.results.map(toRecord).filter((x): x is LiveRecord => !!x);
+  const [body, over] = await Promise.all([
+    getJson<{ count: number; results: unknown[] }>(`${GBIF_API}/occurrence/search?${p}`, signal),
+    countOverMaxUncertainty(q, signal),
+  ]);
+  let records = body.results
+    .map(toRecord)
+    .filter((x): x is LiveRecord => !!x && (x.uncertaintyM === null || x.uncertaintyM <= MAX_UNCERTAINTY_M));
   if (q.group === "other_invertebrates" && !q.taxonKey) {
     records = records.filter((r) => groupOfClass(r.className, groups) === "other_invertebrates");
   }
-  return { count: body.count, records, fetchedAt: new Date().toISOString() };
+  return { count: Math.max(0, body.count - over), records, fetchedAt: new Date().toISOString() };
 }
 
 export interface Facet {
@@ -198,7 +215,9 @@ export interface Facet {
 }
 
 export interface ViewFacets {
-  count: number;
+  count: number; // records in view after the 10 km rule
+  /** Records stating more than 10 km uncertainty: excluded from count, still inside the facet counts. */
+  overMaxUncertainty: number;
   species: Facet[];
   iucn: Facet[];
   classes: Facet[];
@@ -209,9 +228,12 @@ export async function fetchViewFacets(q: LiveQuery, signal?: AbortSignal): Promi
   p.set("limit", "0");
   for (const f of ["speciesKey", "iucnRedListCategory", "classKey"]) p.append("facet", f);
   p.set("facetLimit", "10");
-  const body = await getJson<{ count: number; facets: { field: string; counts: Facet[] }[] }>(`${GBIF_API}/occurrence/search?${p}`, signal);
+  const [body, over] = await Promise.all([
+    getJson<{ count: number; facets: { field: string; counts: Facet[] }[] }>(`${GBIF_API}/occurrence/search?${p}`, signal),
+    countOverMaxUncertainty(q, signal),
+  ]);
   const get = (field: string) => body.facets.find((f) => f.field === field)?.counts ?? [];
-  return { count: body.count, species: get("SPECIES_KEY"), iucn: get("IUCN_RED_LIST_CATEGORY"), classes: get("CLASS_KEY") };
+  return { count: Math.max(0, body.count - over), overMaxUncertainty: over, species: get("SPECIES_KEY"), iucn: get("IUCN_RED_LIST_CATEGORY"), classes: get("CLASS_KEY") };
 }
 
 const taxonCache = new Map<number, Promise<{ name: string; vernacular: string | null; rank: string }>>();
@@ -264,7 +286,7 @@ export async function fetchIucn(usageKey: number): Promise<Conservation | null> 
 
 /** Up to `n` photographs for a species from licensed records. */
 export async function fetchSpeciesPhotos(usageKey: number, n = 6): Promise<{ photos: (Photo & { recordKey: number; date: string | null; country: string | null })[] }> {
-  const p = new URLSearchParams(BASE_FILTERS.filter(([k]) => k !== "coordinateUncertaintyInMeters"));
+  const p = new URLSearchParams(BASE_FILTERS);
   p.set("taxonKey", String(usageKey));
   p.set("mediaType", "StillImage");
   p.set("limit", "30");
