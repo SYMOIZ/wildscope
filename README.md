@@ -156,6 +156,7 @@ prints the CloudFront URL. Confirm the AWS Budgets email subscription when it ar
   only once deployed. If basemap tiles fail, the app switches to bundled Natural Earth imagery and says
   so; place search then still works through the Lambda.
 - Per-IP rate limits from the spec need AWS WAF and are not deployed; the API stage is throttled instead.
+- The CSP allows `'unsafe-eval'` for scripts from this origin only, because CesiumJS bundles Knockout, which evaluates `this` at load.
 
 ## Attributions
 
