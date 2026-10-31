@@ -116,7 +116,8 @@ make check          # pyflakes, Lambda tests, cfn-lint, CSP check, ESLint + word
 
 ## Deploy
 
-Needs AWS CLI v2 with credentials for an account where you can create IAM roles, in `us-east-1`.
+Needs AWS CLI v2 with credentials for an account where you can create IAM roles, in `us-east-1`
+(`aws login` works; the Python publish step then needs `botocore[crt]`, included in `pipeline/requirements.txt`).
 
 ```bash
 make deploy BUDGET_EMAIL=you@example.com
@@ -151,10 +152,10 @@ prints the CloudFront URL. Confirm the AWS Budgets email subscription when it ar
 - **Names**: species missing from the COL release used keep the snapshot's species name without
   vernacular names.
 - Records follow observers: dense cells are often where people record, not where animals are most common.
-- **Not verified live by the author of this build**: the Amazon Location basemap tile URL
-  (`maps.geo.<region>.amazonaws.com/v2/tiles/raster.satellite/{z}/{x}/{y}`) and the Places call run
-  only once deployed. If basemap tiles fail, the app switches to bundled Natural Earth imagery and says
-  so; place search then still works through the Lambda.
+- **Verified live (2026-10-31)**: Amazon Location Maps v2 raster satellite tiles load in CesiumJS
+  through `UrlTemplateImageryProvider` (UD-02 closed: the key is refused without the site referrer),
+  and Places v2 `SearchText` answers through the Lambda. If tiles ever fail, the app switches to the
+  bundled Natural Earth imagery and says so.
 - Per-IP rate limits from the spec need AWS WAF and are not deployed; the API stage is throttled instead.
 - The CSP allows `'unsafe-eval'` for scripts from this origin only, because CesiumJS bundles Knockout, which evaluates `this` at load.
 

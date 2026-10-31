@@ -14,3 +14,4 @@ __pycache__/
 pipeline/build-*.log
 .claude/settings.local.json
 *.tsbuildinfo
+.build-deploy.log

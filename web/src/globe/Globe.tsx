@@ -116,6 +116,24 @@ export function Globe({ layer }: { layer: Layer | null }) {
     layerRef.current = layer;
   }, [layer]);
 
+  // Basemap once config.json has loaded (it carries the Amazon Location key; boot() loads it async).
+  const config = useStore((s) => s.config);
+  useEffect(() => {
+    if (!viewer || !ready || !config) return;
+    const v = viewer;
+    let added: Cesium.ImageryLayer | null = null;
+    void makeBasemap(config.locationRegion, config.locationApiKey, (why) => useStore.getState().toast(why)).then((b) => {
+      if (v.isDestroyed()) return;
+      styleBasemap(b);
+      v.imageryLayers.add(b, 0);
+      added = b;
+      v.scene.requestRender();
+    });
+    return () => {
+      if (added && !v.isDestroyed() && v.imageryLayers.contains(added)) v.imageryLayers.remove(added);
+    };
+  }, [config, ready]);
+
   // Create the viewer once.
   useEffect(() => {
     if (!el.current || viewer) return;
@@ -137,14 +155,6 @@ export function Globe({ layer }: { layer: Layer | null }) {
     v.canvas.setAttribute("tabindex", "0");
     v.canvas.setAttribute("aria-label", "3D globe of recorded occurrences");
     v.cesiumWidget.screenSpaceEventHandler.removeInputAction(Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
-
-    const { config } = useStore.getState();
-    void makeBasemap(config?.locationRegion ?? "us-east-1", config?.locationApiKey ?? null, (why) => useStore.getState().toast(why)).then((b) => {
-      if (v.isDestroyed()) return;
-      styleBasemap(b);
-      v.imageryLayers.add(b, 0);
-      scene.requestRender();
-    });
 
     // Camera → store (lat/lon/height + LOD with hysteresis).
     const onCamera = () => {
@@ -211,14 +221,30 @@ export function Globe({ layer }: { layer: Layer | null }) {
     onCamera();
     setReady(true);
     // requestRenderMode only draws on demand: redraw whenever the container size changes (incl. first layout).
-    const ro = new ResizeObserver(() => {
-      if (v.isDestroyed()) return;
+    const hasSize = () => v.canvas.clientWidth > 0 && v.canvas.clientHeight > 0;
+    const restart = () => {
+      if (v.isDestroyed() || !hasSize()) return;
+      v.useDefaultRenderLoop = true; // Cesium turns the loop off after a render error
       v.resize();
       scene.requestRender();
-    });
+    };
+    const ro = new ResizeObserver(restart);
     ro.observe(el.current);
 
-    scene.renderError.addEventListener(() => useStore.getState().set({ banner: { text: "Graphics context lost. Reload the page to restore the view.", retry: () => location.reload() } }));
+    // A canvas collapsed to 0 px (hidden pane, minimised split view) makes Cesium throw and stop
+    // rendering; that recovers silently on the next resize. Anything else gets a banner with Retry.
+    scene.renderError.addEventListener(() => {
+      if (!hasSize()) return;
+      useStore.getState().set({
+        banner: {
+          text: "The globe stopped drawing. Retry",
+          retry: () => {
+            useStore.getState().set({ banner: null });
+            restart();
+          },
+        },
+      });
+    });
     return () => {
       ro.disconnect();
       h.destroy();

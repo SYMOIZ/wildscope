@@ -11,6 +11,7 @@ PY="${PY:-python}"
 SKIP_DATA="${SKIP_DATA:-0}"
 : "${BUDGET_EMAIL:?set BUDGET_EMAIL to the address for budget alerts}"
 export AWS_REGION="$REGION" AWS_DEFAULT_REGION="$REGION"
+export MSYS_NO_PATHCONV=1  # Git Bash on Windows would rewrite "/index.html" into a local path
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"

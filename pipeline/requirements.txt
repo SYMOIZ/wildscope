@@ -4,3 +4,4 @@ PyYAML>=6.0
 jsonschema>=4.23
 brotli>=1.1
 boto3>=1.35
+botocore[crt]>=1.35  # needed for credentials from `aws login`

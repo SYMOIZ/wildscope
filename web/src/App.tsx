@@ -14,9 +14,12 @@ import { CellPanel, SpeciesPanel } from "./components/Panels";
 import { Timeline } from "./components/Timeline";
 import { TopBar } from "./components/TopBar";
 
+/** Probe once, then release the probe context: browsers cap live WebGL contexts and drop the oldest (Cesium's). */
 function hasWebGL2() {
   try {
-    return !!document.createElement("canvas").getContext("webgl2");
+    const gl = document.createElement("canvas").getContext("webgl2");
+    gl?.getExtension("WEBGL_lose_context")?.loseContext();
+    return !!gl;
   } catch {
     return false;
   }
@@ -53,7 +56,7 @@ async function boot() {
 }
 
 export default function App() {
-  const [fatal, setFatal] = useState<string | null>(hasWebGL2() ? null : "webgl");
+  const [fatal, setFatal] = useState<string | null>(() => (hasWebGL2() ? null : "webgl"));
   const st = useStore();
   const [layer, setLayer] = useState<Layer | null>(null);
   const [layerLoading, setLayerLoading] = useState(false);
