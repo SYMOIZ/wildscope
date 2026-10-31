@@ -1,4 +1,3 @@
-import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "@fontsource/fraunces/400.css";
 import "@fontsource/fraunces/400-italic.css";
@@ -11,8 +10,5 @@ import "@fontsource/jetbrains-mono/500.css";
 import "./styles.css";
 import App from "./App";
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+// No StrictMode: the Cesium viewer is an imperative singleton and must not be mounted twice.
+createRoot(document.getElementById("root")!).render(<App />);

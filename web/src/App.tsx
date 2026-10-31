@@ -75,7 +75,8 @@ export default function App() {
       setLanding(false);
       useStore.getState().set({ arrived: true });
     };
-    if (useStore.getState().camera || useStore.getState().speciesKey) settle();
+    const u = readUrl();
+    if (u.cam || u.sp) settle(); // shared links open straight into the view
     const t = window.setTimeout(settle, K.ARRIVAL_MS);
     const opts = { once: true, capture: true } as const;
     window.addEventListener("pointerdown", settle, opts);

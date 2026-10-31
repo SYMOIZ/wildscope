@@ -1,13 +1,38 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
-import { viteStaticCopy } from "vite-plugin-static-copy";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CSP } from "./src/csp";
 
-const cesiumSource = "node_modules/cesium/Build/Cesium";
-const dataRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../pipeline/out");
+const here = path.dirname(fileURLToPath(import.meta.url));
+const dataRoot = path.resolve(here, "../pipeline/out");
+const cesiumRoot = path.resolve(here, "node_modules/cesium/Build/Cesium");
+
+// Cesium's runtime files (Workers, Assets, Widgets, ThirdParty) at /cesium: served in dev, copied on build.
+function cesiumAssets(): Plugin {
+  const types: Record<string, string> = { ".js": "text/javascript", ".json": "application/json", ".xml": "application/xml", ".css": "text/css", ".jpg": "image/jpeg", ".png": "image/png", ".wasm": "application/wasm" };
+  return {
+    name: "wildscope-cesium-assets",
+    configureServer(s) {
+      s.middlewares.use((req, res, next) => {
+        const url = (req.url || "").split("?")[0];
+        if (!url.startsWith("/cesium/")) return next();
+        const file = path.normalize(path.join(cesiumRoot, decodeURIComponent(url.slice("/cesium/".length))));
+        if (!file.startsWith(cesiumRoot) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+          res.statusCode = 404;
+          return res.end("not found");
+        }
+        res.setHeader("Content-Type", types[path.extname(file)] ?? "application/octet-stream");
+        fs.createReadStream(file).pipe(res);
+      });
+    },
+    writeBundle(options) {
+      const out = path.join(options.dir ?? path.join(here, "dist"), "cesium");
+      for (const d of ["Workers", "ThirdParty", "Assets", "Widgets"]) fs.cpSync(path.join(cesiumRoot, d), path.join(out, d), { recursive: true });
+    },
+  };
+}
 
 // Serves the local pipeline output at /data/v1/ in dev and preview, the same layout CloudFront serves.
 function localData(): Plugin {
@@ -32,9 +57,7 @@ function localData(): Plugin {
 export default defineConfig({
   plugins: [
     react(),
-    viteStaticCopy({
-      targets: ["Workers", "ThirdParty", "Assets", "Widgets"].map((d) => ({ src: `${cesiumSource}/${d}`, dest: "cesium" })),
-    }),
+    cesiumAssets(),
     localData(),
   ],
   define: { CESIUM_BASE_URL: JSON.stringify("/cesium") },

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import * as K from "../config/interaction";
 import { fmtExact, fmtShare } from "../data/format";
 import { useStore } from "../state/store";
+import { readUrl } from "../state/url";
 import { CellImageryProvider } from "./cellLayer";
 import type { Layer } from "./layerModel";
 
@@ -122,7 +123,7 @@ export function Globe({ layer }: { layer: Layer | null }) {
       baseLayer: false,
       animation: false, timeline: false, geocoder: false, homeButton: false, sceneModePicker: false,
       baseLayerPicker: false, navigationHelpButton: false, fullscreenButton: false, infoBox: false,
-      selectionIndicator: false, requestRenderMode: true, maximumRenderTimeChange: Infinity,
+      selectionIndicator: false, requestRenderMode: true, showRenderLoopErrors: false, maximumRenderTimeChange: Infinity,
     });
     viewer = v;
     const scene = v.scene;
@@ -139,6 +140,7 @@ export function Globe({ layer }: { layer: Layer | null }) {
 
     const { config } = useStore.getState();
     void makeBasemap(config?.locationRegion ?? "us-east-1", config?.locationApiKey ?? null, (why) => useStore.getState().toast(why)).then((b) => {
+      if (v.isDestroyed()) return;
       styleBasemap(b);
       v.imageryLayers.add(b, 0);
       scene.requestRender();
@@ -194,8 +196,9 @@ export function Globe({ layer }: { layer: Layer | null }) {
 
     // Initial camera: URL camera if present, else the arrival sequence (S01).
     const s = useStore.getState();
-    if (s.camera) {
-      v.camera.setView({ destination: Cesium.Cartesian3.fromDegrees(s.camera.lon, s.camera.lat, s.camera.height) });
+    const urlCam = readUrl().cam; // read synchronously: boot() fills the store asynchronously
+    if (urlCam) {
+      v.camera.setView({ destination: Cesium.Cartesian3.fromDegrees(urlCam.lon, urlCam.lat, urlCam.height) });
       s.set({ arrived: true });
     } else {
       v.camera.setView({ destination: Cesium.Cartesian3.fromDegrees(20, 15, K.ARRIVAL_START_HEIGHT_M) });
@@ -207,12 +210,22 @@ export function Globe({ layer }: { layer: Layer | null }) {
     }
     onCamera();
     setReady(true);
+    // requestRenderMode only draws on demand: redraw whenever the container size changes (incl. first layout).
+    const ro = new ResizeObserver(() => {
+      if (v.isDestroyed()) return;
+      v.resize();
+      scene.requestRender();
+    });
+    ro.observe(el.current);
 
     scene.renderError.addEventListener(() => useStore.getState().set({ banner: { text: "Graphics context lost. Reload the page to restore the view.", retry: () => location.reload() } }));
     return () => {
+      ro.disconnect();
       h.destroy();
       v.destroy();
       viewer = null;
+      dataLayer.current = null;
+      setReady(false);
     };
   }, []);
 
@@ -242,6 +255,7 @@ export function Globe({ layer }: { layer: Layer | null }) {
       const t = Math.min(1, (performance.now() - start) / 480);
       next.alpha = K.DATA_LAYER_ALPHA * t;
       if (old) old.alpha = K.DATA_LAYER_ALPHA * (1 - t);
+      if (v.isDestroyed()) return;
       v.scene.requestRender();
       if (t < 1) raf = requestAnimationFrame(step);
       else if (old) v.imageryLayers.remove(old);
@@ -249,6 +263,7 @@ export function Globe({ layer }: { layer: Layer | null }) {
     raf = requestAnimationFrame(step);
     return () => {
       cancelAnimationFrame(raf);
+      if (v.isDestroyed()) return;
       if (old && v.imageryLayers.contains(old)) v.imageryLayers.remove(old);
       next.alpha = K.DATA_LAYER_ALPHA;
     };
@@ -272,6 +287,7 @@ export function Globe({ layer }: { layer: Layer | null }) {
     }
     v.scene.requestRender();
     return () => {
+      if (v.isDestroyed()) return;
       ents.forEach((e) => v.entities.remove(e));
       v.scene.requestRender();
     };

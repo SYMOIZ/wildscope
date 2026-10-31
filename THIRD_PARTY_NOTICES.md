@@ -18,7 +18,7 @@ Derived aggregate files produced by `pipeline/` are released under CC BY 4.0.
 | h3-js, H3 (C library, via the `h3` Python package and the DuckDB `h3` community extension) | Apache-2.0 |
 | DuckDB | MIT |
 | zustand | MIT |
-| Vite, @vitejs/plugin-react, vite-plugin-static-copy | MIT |
+| Vite, @vitejs/plugin-react | MIT |
 | boto3 / botocore | Apache-2.0 |
 | PyYAML | MIT |
 | jsonschema | MIT |

@@ -33,7 +33,7 @@ export function Legend({ layer, loading }: { layer: Layer | null; loading: boole
         </button>
       </div>
       {!built && manifest && (
-        <p className="notice">No Trees data in this build. {manifest.lenses.trees.reason}</p>
+        <p className="notice">{manifest.lenses.trees.reason}</p>
       )}
       {built && layer && (
         <>
@@ -48,11 +48,17 @@ export function Legend({ layer, loading }: { layer: Layer | null; loading: boole
                     {ramp.map((c) => <span key={c} style={{ background: c }} />)}
                   </div>
                   <div className="ticks mono" data-source="A-02">
-                    {layer.breaks.length >= 7
-                      ? layer.breaks.map((b, i) => <span key={i}>{fmt(b)}</span>)
-                      : <span style={{ gridColumn: "1 / -1" }}>from {fmt(layer.breaks[0] ?? 0)} (log scale)</span>}
+                    {layer.breaks.length >= 7 ? (
+                      <>
+                        <span>{fmt(layer.breaks[0])}</span>
+                        <span style={{ textAlign: "center" }}>{fmt(layer.breaks[3])}</span>
+                        <span style={{ textAlign: "right" }}>{fmt(layer.breaks[6])}+</span>
+                      </>
+                    ) : (
+                      <span>from {fmt(layer.breaks[0] ?? 0)}</span>
+                    )}
                   </div>
-                  <div className="caption muted">Log scale. Lower bound of each class{species && mode !== "effort" ? "; scale is relative to this species' records" : ""}.</div>
+                  <div className="caption muted">Log scale, 7 classes; labels are the lower bounds of classes 1, 4 and 7{species && mode !== "effort" ? "; scale is relative to this species' records" : ""}.</div>
                 </>
               )}
               {layer.isShare && (
