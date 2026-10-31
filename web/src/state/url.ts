@@ -22,7 +22,7 @@ export function readUrl(): UrlState {
   const q = new URLSearchParams(location.search);
   const out: UrlState = {};
   const lens = q.get("lens");
-  if (lens === "animals" || lens === "trees") out.lens = lens;
+  if (lens === "animals") out.lens = lens; // Trees is not offered in this build; old links fall back to Animals
   const group = q.get("group");
   if (group && /^[a-z_]{2,32}$/.test(group)) out.group = group;
   const sp = q.get("sp");

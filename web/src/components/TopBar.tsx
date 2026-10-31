@@ -5,7 +5,6 @@ import { shareView } from "./share";
 
 export function TopBar() {
   const lens = useStore((s) => s.lens);
-  const setLens = useStore((s) => s.setLens);
   const species = useStore((s) => s.species);
   const clearSpecies = useStore((s) => s.clearSpecies);
   const manifest = useStore((s) => s.manifest);
@@ -17,13 +16,7 @@ export function TopBar() {
   return (
     <header className="topbar">
       <div className="wordmark">WildScope</div>
-      <div className="lens-switch" role="group" aria-label="Lens">
-        {(["trees", "animals"] as const).map((l) => (
-          <button key={l} aria-pressed={lens === l} onClick={() => setLens(l)} aria-keyshortcuts={l === "trees" ? "T" : "A"}>
-            {l === "trees" ? "Trees" : "Animals"}
-          </button>
-        ))}
-      </div>
+      <span className="lens-label" aria-label="Lens">Animals</span>
       {groups.length > 0 && (
         <label className="group-menu">
           <span className="sr-only">Group</span>

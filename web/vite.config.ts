@@ -39,7 +39,10 @@ function localData(): Plugin {
   const handler = (req: { url?: string }, res: import("node:http").ServerResponse, next: () => void) => {
     const url = (req.url || "").split("?")[0];
     if (!url.startsWith("/data/v1/")) return next();
-    const file = path.normalize(path.join(dataRoot, url.slice("/data/v1/".length)));
+    let rel = url.slice("/data/v1/".length);
+    const [id, ...rest] = rel.split("/");
+    if (rest.length && !fs.existsSync(path.join(dataRoot, id))) rel = [id.replace(/-[0-9a-f]{8}$/, ""), ...rest].join("/");
+    const file = path.normalize(path.join(dataRoot, rel));
     if (!file.startsWith(dataRoot) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
       res.statusCode = 404;
       return res.end("not found");

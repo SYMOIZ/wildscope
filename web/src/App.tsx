@@ -62,6 +62,7 @@ export default function App() {
   const st = useStore();
   const [layer, setLayer] = useState<Layer | null>(null);
   const [layerLoading, setLayerLoading] = useState(false);
+  const [retry, setRetry] = useState(0); // bumping it re-runs the layer load (banner Retry)
   const [landing, setLanding] = useState(true);
 
   useEffect(() => {
@@ -122,13 +123,13 @@ export default function App() {
         }
       })
       .catch(() => {
-        if (!cancelled) useStore.getState().set({ banner: { text: "Could not load the record density layer. Retry", retry: () => setLayer(null) } });
+        if (!cancelled) useStore.getState().set({ banner: { text: "Could not load the record density layer.", retry: () => setRetry((n) => n + 1) } });
       })
       .finally(() => !cancelled && setLayerLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [params]);
+  }, [params, retry]);
 
   // Keyboard map (INTERACTION §13).
   useEffect(() => {
@@ -138,8 +139,6 @@ export default function App() {
       const s = useStore.getState();
       const onCanvas = (e.target as HTMLElement)?.tagName === "CANVAS";
       switch (e.key) {
-        case "t": case "T": s.setLens("trees"); break;
-        case "a": case "A": s.setLens("animals"); break;
         case "i": case "I": s.set({ notesOpen: !s.notesOpen }); break;
         case "n": case "N": globeApi.resetNorth(); break;
         case "h": case "H": globeApi.home(); break;
@@ -195,7 +194,7 @@ export default function App() {
       {(layerLoading || st.loading > 0) && <div className="progress" role="progressbar" aria-label="Loading data" />}
       <div className={`landing${landing ? "" : " gone"}`} aria-hidden={!landing}>
         <h1>Where life has been recorded.</h1>
-        <p>Trees and animals across the planet, from open biodiversity records.</p>
+        <p>Animals across the planet, from open biodiversity records.</p>
         <button className="btn" onClick={() => setLanding(false)}>Begin</button>
       </div>
       <div className={`chrome${landing ? " hidden" : ""}`}>

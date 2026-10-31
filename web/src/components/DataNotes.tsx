@@ -78,7 +78,7 @@ export function DataNotes() {
       <h3>Groups and lenses</h3>
       <p className="small">
         Animals groups follow GBIF Backbone classes (groups version {m.lenses.animals.groupsVersion}). Fishes (grouped) is a functional grouping, not a clade.
-        {" "}{m.lenses.trees.reason}
+        {" "}Trees are not included in this build: there is no settled, licensed list of which plant species are trees.
       </p>
       <p className="small">
         Species files exist for <Num value={m.species.count} source="A-01" exact /> species with at least{" "}

@@ -34,9 +34,6 @@ export function Legend({ layer, loading }: { layer: Layer | null; loading: boole
           <Icon name={open ? "collapse" : "expand"} />
         </button>
       </div>
-      {!built && manifest && (
-        <p className="notice">{manifest.lenses.trees.reason}</p>
-      )}
       {built && layer && (
         <>
           <div className="caption">{caption}</div>

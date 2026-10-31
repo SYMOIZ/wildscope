@@ -19,7 +19,7 @@ export function LevelBar() {
   const lv = LEVEL[lod];
   let detail: React.ReactNode = null;
   if (lod === 2) {
-    if (lens !== "animals") detail = <> · no Trees data in this build</>;
+    if (lens !== "animals") detail = null;
     else if (live.status === "loading" && !live.result) detail = <> · loading records…</>;
     else if (live.status === "error") detail = <> · GBIF did not answer <button className="link" onClick={retryLive}>Retry</button></>;
     else if (live.result) {

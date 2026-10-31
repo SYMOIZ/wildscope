@@ -826,9 +826,14 @@ def step8_encode(args, work: Path, out_dir: Path, dataset_id: str) -> dict:
         hashes[sub] = h.hexdigest()
 
     sample = bool(args.sample_every and args.sample_every > 1) or bool(args.max_files)
+    # Files are served as immutable (cached for a year), so a rebuilt dataset must never reuse a path:
+    # the published id carries a short hash of every asset's content.
+    content = hashlib.sha256(dumps({"cells": {k: v["sha256"] for k, v in assets.items()}, **hashes})).hexdigest()[:8]
+    versioned_id = f"{dataset_id}-{content}"
     manifest = {
         "schemaVersion": C.SCHEMA_VERSION,
-        "datasetId": dataset_id,
+        "datasetId": versioned_id,
+        "buildFolder": dataset_id,
         "snapshot": {
             "id": schema["snapshot"],
             "source": schema["source"],
@@ -1052,6 +1057,9 @@ def step10_publish(args, out_dir: Path, dataset_id: str) -> None:
     report = json.loads((out_dir.parent / f"{out_dir.name}.test_report.json").read_text())
     if not report.get("ok"):
         raise BuildError("refusing to publish: step 9 report is not ok")
+    manifest = json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))
+    if manifest["datasetId"] != dataset_id:
+        raise BuildError(f"manifest datasetId {manifest['datasetId']} != {dataset_id}; re-run the encode step")
     s3 = boto3.client("s3")
     prefix = f"data/v1/{dataset_id}/"
     files = sorted(p for p in out_dir.rglob("*") if p.is_file())
@@ -1116,10 +1124,12 @@ def main(argv=None) -> int:
     out_root = PIPE / "out"
     try:
         if args.step == "publish":
-            ds = args.dataset_id or json.loads((out_root / "last_build.json").read_text())["datasetId"]
+            last = json.loads((out_root / "last_build.json").read_text())
+            ds = args.dataset_id or last["datasetId"]
+            folder = last["folder"] if ds == last["datasetId"] else ds.rsplit("-", 1)[0]
             if not args.bucket:
                 raise BuildError("--bucket is required for publish")
-            step10_publish(args, out_root / ds, ds)
+            step10_publish(args, out_root / folder, ds)
             return 0
         snapshot = args.snapshot
         if snapshot == "latest" or args.step in ("verify", "all"):
@@ -1147,8 +1157,10 @@ def main(argv=None) -> int:
         order = list(steps) if args.step == "all" else ([] if args.step == "verify" else [args.step])
         for s in order:
             steps[s]()
-        (out_root / "last_build.json").write_bytes(dumps({"datasetId": ds}))
-        (out_root / "latest.json").write_bytes(dumps({"datasetId": ds, "path": f"/data/v1/{ds}/"}))
+        mpath = out_dir / "manifest.json"
+        published = json.loads(mpath.read_text(encoding="utf-8"))["datasetId"] if mpath.exists() else ds
+        (out_root / "last_build.json").write_bytes(dumps({"datasetId": published, "folder": ds}))
+        (out_root / "latest.json").write_bytes(dumps({"datasetId": published, "path": f"/data/v1/{published}/"}))
         return 0
     except BuildError as e:
         log(f"BUILD FAILED: {e}")
