@@ -2,14 +2,16 @@ import { useState } from "react";
 import { fmtCount, fmtShare } from "../data/format";
 import type { Layer } from "../globe/layerModel";
 import { RAMPS } from "../globe/ramps";
+import { GROUP_COLORS } from "../globe/Globe";
 import { useStore } from "../state/store";
 import { Icon } from "./Icon";
 
 export function Legend({ layer, loading }: { layer: Layer | null; loading: boolean }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(() => window.innerHeight > 760); // short screens: start collapsed so it never covers the group rail
   const lens = useStore((s) => s.lens);
   const manifest = useStore((s) => s.manifest);
   const species = useStore((s) => s.species);
+  const lod = useStore((s) => s.lod);
   const mode = useStore((s) => s.mode);
   const set = useStore((s) => s.set);
   const ramp = RAMPS[lens];
@@ -64,6 +66,17 @@ export function Legend({ layer, loading }: { layer: Layer | null; loading: boole
               {layer.isShare && (
                 <div className="row" style={{ marginTop: 8 }}>
                   <span><span className="hatch" style={{ display: "inline-block", verticalAlign: "middle", marginRight: 6 }} />Insufficient effort (&lt; {manifest?.constants.MIN_EFFORT} records)</span>
+                </div>
+              )}
+              {lod === 2 && (
+                <div className="record-key">
+                  <div className="caption">Small orange dots: all matching GBIF records (denser = redder). Larger points: clickable records, by group</div>
+                  <ul>
+                    {(manifest?.lenses.animals.groups ?? []).filter((g) => g.id !== "all").map((g) => (
+                      <li key={g.id}><span className="dot" style={{ background: GROUP_COLORS[g.id] }} />{g.label}</li>
+                    ))}
+                  </ul>
+                  <div className="caption muted">Numbered circles are clusters of nearby records; click to zoom in.</div>
                 </div>
               )}
               {species && (

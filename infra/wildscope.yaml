@@ -133,7 +133,7 @@ Resources:
           # Must equal web/src/csp.ts (checked by `make check`).
           ContentSecurityPolicy:
             Override: true
-            ContentSecurityPolicy: "default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://maps.geo.us-east-1.amazonaws.com; connect-src 'self' https://maps.geo.us-east-1.amazonaws.com; worker-src 'self' blob:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+            ContentSecurityPolicy: "default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://maps.geo.us-east-1.amazonaws.com https://api.gbif.org; connect-src 'self' https://maps.geo.us-east-1.amazonaws.com https://api.gbif.org; worker-src 'self' blob:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
           StrictTransportSecurity: { Override: true, AccessControlMaxAgeSec: 31536000, IncludeSubdomains: true }
           ContentTypeOptions: { Override: true }
           ReferrerPolicy: { Override: true, ReferrerPolicy: strict-origin-when-cross-origin }

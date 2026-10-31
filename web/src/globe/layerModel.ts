@@ -1,6 +1,7 @@
 import { cellToParent } from "h3-js";
 import { loadDensity } from "../data/assets";
 import type { BinSel, DensityFile, Lens, Manifest, SpeciesDoc } from "../data/types";
+import type { Lod } from "../state/store";
 import { classOf, computeBreaks, RAMPS } from "./ramps";
 import type { CellValues } from "./cellLayer";
 
@@ -18,6 +19,7 @@ export interface Layer {
   key: string;
   kind: LayerKind;
   res: number;
+  lod: Lod;
   draw: CellValues;
   info: Map<string, CellInfo>;
   breaks: number[];
@@ -32,7 +34,7 @@ export interface LayerParams {
   lens: Lens;
   group: string;
   bin: BinSel;
-  lod: 0 | 1;
+  lod: Lod;
   normalised: boolean;
   mode: "density" | "effort";
   species: SpeciesDoc | null;
@@ -125,7 +127,8 @@ export async function buildLayer(p: LayerParams): Promise<Layer> {
     key: layerKey(p),
     kind,
     res,
-    draw: { ids, colors, hatched: ids.map((id) => info.get(id)!.hatched) },
+    lod: p.lod,
+    draw: { ids, colors, hatched: ids.map((id) => info.get(id)!.hatched), style: p.lod === 2 ? "outline" : p.lod === 1 ? "fill-edged" : "fill" },
     info,
     breaks,
     isShare: kind === "density-normalised" || kind === "species-normalised",

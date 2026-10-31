@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WildScope region file (A-05): one res-2 cell and its populated res-4 children",
+  "type": "object",
+  "required": ["schemaVersion", "res2", "cell", "children", "names"],
+  "$defs": {
+    "summary": {
+      "type": "object",
+      "required": ["records", "species", "datasets", "noUncertainty", "byBin", "speciesByBin", "groups", "top"],
+      "properties": {
+        "records": { "type": "integer", "minimum": 1 },
+        "species": { "type": "integer", "minimum": 1 },
+        "datasets": { "type": "integer", "minimum": 1 },
+        "byBin": { "type": "array", "minItems": 9, "maxItems": 9, "items": { "type": "integer", "minimum": 0 } },
+        "speciesByBin": { "type": "array", "minItems": 9, "maxItems": 9, "items": { "type": "integer", "minimum": 0 } },
+        "groups": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 1 } },
+        "top": { "type": "object", "propertyNames": { "pattern": "^(all|B0[0-8])$" },
+                 "additionalProperties": { "type": "array", "maxItems": 20, "items": { "type": "array", "minItems": 2, "maxItems": 2 } } }
+      }
+    }
+  },
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "res2": { "type": "string", "pattern": "^[0-9a-f]{15}$" },
+    "cell": { "$ref": "#/$defs/summary" },
+    "children": { "type": "object", "propertyNames": { "pattern": "^[0-9a-f]{15}$" }, "additionalProperties": { "$ref": "#/$defs/summary" } },
+    "names": { "type": "object", "additionalProperties": { "type": "array", "minItems": 4, "maxItems": 4 } }
+  }
+}

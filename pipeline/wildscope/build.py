@@ -245,7 +245,7 @@ def step1_filter(args, work: Path, schema: dict) -> dict:
         WHEN coordinateuncertaintyinmeters > {C.MAX_UNCERTAINTY_M_R2_R4} THEN 'F8'
         WHEN kingdom IS DISTINCT FROM 'Animalia' THEN 'F9'
         ELSE 'kept' END"""
-    kept_cols = ["specieskey", "species", "phylum", "class", '"order"', "family", "genus", "year", "license", "countrycode"]
+    kept_cols = ["specieskey", "species", "phylum", "class", '"order"', "family", "genus", "year", "license", "countrycode", "datasetkey"]
     proj = ",\n".join(f"CASE WHEN stage = 'kept' THEN {c} END AS {c}" for c in kept_cols)
     select_sql = f"""
         SELECT stage,
@@ -253,7 +253,8 @@ def step1_filter(args, work: Path, schema: dict) -> dict:
                {proj},
                CASE WHEN stage = 'kept' THEN decimallatitude END AS lat,
                CASE WHEN stage = 'kept' THEN decimallongitude END AS lon,
-               CASE WHEN stage = 'kept' THEN coordinateuncertaintyinmeters IS NULL END AS unc_null
+               CASE WHEN stage = 'kept' THEN coordinateuncertaintyinmeters IS NULL END AS unc_null,
+               CASE WHEN stage = 'kept' THEN CAST(eventdate AS DATE) END AS eventdate
         FROM (SELECT *, {stage} AS stage FROM read_parquet('{{f}}') {country})"""
     log(f"step 1: reading {len(files)} of {len(parts)} parts{' for country ' + args.country if args.country else ''}")
     t = time.time()
@@ -324,11 +325,18 @@ def step23_aggregate(args, work: Path) -> dict:
     staged = (work / "staged" / "*.parquet").as_posix()
     con.execute(f"""
       CREATE OR REPLACE TABLE kept AS
-      SELECT specieskey, phylum, class, year, license, countrycode,
+      SELECT specieskey, phylum, class, year, license, countrycode, datasetkey, unc_null,
              h3_latlng_to_cell(lat, lon, 4) AS c4,
              {bin_case_sql()} AS bin,
              {group_case_sql(groups)} AS grp
-      FROM read_parquet('{staged}') WHERE stage = 'kept'""")
+      FROM (
+        -- D1 duplicates: the same species at the same coordinates (5 dp, about 1 m) on the same date is
+        -- counted once, even when several datasets publish it. Records without a date are never merged.
+        SELECT *, row_number() OVER (PARTITION BY specieskey, round(lat, 5), round(lon, 5), eventdate
+                                     ORDER BY datasetkey) AS dup_rank
+        FROM read_parquet('{staged}') WHERE stage = 'kept')
+      WHERE eventdate IS NULL OR dup_rank = 1""")
+    before = con.execute(f"SELECT count(*) FROM read_parquet('{staged}') WHERE stage = 'kept'").fetchone()[0]
     # Taxonomy text once per species, not per record (keeps the full-snapshot table narrow).
     con.execute(f"""
       CREATE OR REPLACE TABLE taxa AS
@@ -348,9 +356,9 @@ def step23_aggregate(args, work: Path) -> dict:
     inventory = [{"phylum": p, "class": c, "group": g, "records": n} for p, c, g, n in inv]
 
     con.execute("CREATE OR REPLACE TABLE agg4 AS SELECT grp, c4 AS cell, bin, count(*)::UINTEGER n FROM kept GROUP BY ALL")
-    log(f"step 2-3 ok: {total:,} kept records, {con.execute('SELECT count(DISTINCT cell) FROM agg4').fetchone()[0]:,} populated r4 cells")
+    log(f"step 2-3 ok: {total:,} kept records ({before - total:,} duplicates removed), {con.execute('SELECT count(DISTINCT cell) FROM agg4').fetchone()[0]:,} populated r4 cells")
     con.close()
-    out = {"keptAnimals": total, "classInventory": inventory}
+    out = {"keptAnimals": total, "keptBeforeDedup": before, "duplicatesRemoved": before - total, "classInventory": inventory}
     (work / "aggregate_stats.json").write_bytes(dumps(out))
     return out
 
@@ -482,6 +490,22 @@ def coldp_names(keys: list[str]) -> dict[str, dict]:
     return out
 
 
+_CODE = re.compile(r"^[A-Z0-9]{2,6}$")
+
+
+def clean_vernacular(names: list[dict]) -> list[dict]:
+    """Order vernacular names for display: English first; within a language, real names before
+    banding/abbreviation codes (e.g. "GRWA") and multi-species labels ("X and Y"). Codes are dropped.
+    The source order is otherwise kept, because COL gives no 'preferred' flag through the API."""
+    kept = [n for n in names if not _CODE.match(n["name"].strip())]
+
+    def key(n):
+        name = n["name"]
+        return (0 if n["lang"] == "eng" else 1, n["lang"] or "~", 1 if " and " in name or "/" in name else 0)
+
+    return sorted(kept, key=key)
+
+
 def fold(s: str) -> str:
     return "".join(ch for ch in unicodedata.normalize("NFKD", s.lower()) if not unicodedata.combining(ch))
 
@@ -561,7 +585,7 @@ def step4_species(args, work: Path, out_dir: Path) -> dict:
             "canonicalName": canonical,
             "rank": nm.get("rank"),
             "taxonomicStatus": nm.get("taxonomicStatus"),
-            "vernacularNames": nm.get("vernacularNames", []),
+            "vernacularNames": clean_vernacular(nm.get("vernacularNames", [])),
             "vernacularNamesTotal": nm.get("vernacularNamesTotal", 0),
             "lens": "animals",
             "group": grp,
@@ -636,6 +660,94 @@ def step4_species(args, work: Path, out_dir: Path) -> dict:
 
 
 # --------------------------------------------------------------------------------------
+# Step 3b - region summaries (A-05): one file per res-2 cell with its own summary and its res-4 children
+# --------------------------------------------------------------------------------------
+
+TOP_ALL = 20
+TOP_PER_BIN = 10
+
+
+def step3b_regions(args, work: Path, out_dir: Path) -> dict:
+    con = duckdb.connect((work / "agg.duckdb").as_posix(), read_only=True)
+    con.execute("LOAD h3;")
+    con.execute("""
+      CREATE TEMP TABLE k AS
+      SELECT h3_h3_to_string(h3_cell_to_parent(c4, 2)) AS r2, h3_h3_to_string(c4) AS r4,
+             specieskey, bin, grp, datasetkey, unc_null
+      FROM kept""")
+    summaries: dict[str, dict] = {}
+
+    def fill(col: str) -> None:
+        for cell, n, sp, ds, unc in con.execute(f"""
+            SELECT {col}, count(*), count(DISTINCT specieskey), count(DISTINCT datasetkey),
+                   count(*) FILTER (WHERE unc_null) FROM k GROUP BY 1""").fetchall():
+            summaries[cell] = {"records": n, "species": sp, "datasets": ds, "noUncertainty": unc,
+                               "byBin": [0] * 9, "speciesByBin": [0] * 9, "groups": {}, "top": {}}
+        for cell, b, n, sp in con.execute(f"SELECT {col}, bin, count(*), count(DISTINCT specieskey) FROM k GROUP BY 1, 2").fetchall():
+            summaries[cell]["byBin"][b] = n
+            summaries[cell]["speciesByBin"][b] = sp
+        for cell, g, n in con.execute(f"SELECT {col}, grp, count(*) FROM k GROUP BY 1, 2 ORDER BY 1, 3 DESC, 2").fetchall():
+            summaries[cell]["groups"][g] = n
+        for cell, key, n in con.execute(f"""
+            SELECT {col}, specieskey, n FROM (
+              SELECT {col}, specieskey, count(*) n,
+                     row_number() OVER (PARTITION BY {col} ORDER BY count(*) DESC, specieskey) rn
+              FROM k GROUP BY 1, 2) WHERE rn <= {TOP_ALL} ORDER BY 1, rn""").fetchall():
+            summaries[cell]["top"].setdefault("all", []).append([key, n])
+        for cell, b, key, n in con.execute(f"""
+            SELECT {col}, bin, specieskey, n FROM (
+              SELECT {col}, bin, specieskey, count(*) n,
+                     row_number() OVER (PARTITION BY {col}, bin ORDER BY count(*) DESC, specieskey) rn
+              FROM k GROUP BY 1, 2, 3) WHERE rn <= {TOP_PER_BIN} ORDER BY 1, 2, rn""").fetchall():
+            summaries[cell]["top"].setdefault(C.BINS[b]["id"], []).append([key, n])
+
+    fill("r2")
+    fill("r4")
+    children: dict[str, list] = {}
+    for r2, r4 in con.execute("SELECT DISTINCT r2, r4 FROM k ORDER BY 1, 2").fetchall():
+        children.setdefault(r2, []).append(r4)
+    # Display names: COL names where a species file exists, else the cached COL name, else the snapshot name.
+    taxa = dict(con.execute("SELECT specieskey, species FROM taxa").fetchall())
+    groups_of = dict(con.execute("SELECT specieskey, mode(grp) FROM kept GROUP BY 1").fetchall())
+    con.close()
+    with_file = {f.stem for f in (out_dir / "species").glob("*.json")}
+
+    def name_of(key: str) -> list:
+        vern = None
+        canonical = taxa.get(key)
+        cache = CACHE / "col_species" / f"{key}.json"
+        if key in with_file:
+            doc = json.loads((out_dir / "species" / f"{key}.json").read_text(encoding="utf-8"))
+            canonical = doc["canonicalName"]
+            vern = next((v["name"] for v in clean_vernacular(doc["vernacularNames"]) if v["lang"] == "eng"), None)
+        elif cache.exists():
+            c = json.loads(cache.read_text(encoding="utf-8"))
+            canonical = c.get("canonicalName") or canonical
+            vern = next((v["name"] for v in clean_vernacular(c.get("vernacularNames", [])) if v["lang"] == "eng"), None)
+        return [canonical, vern, groups_of.get(key), key in with_file]
+
+    rg_dir = out_dir / "region" / "animals"
+    rg_dir.mkdir(parents=True, exist_ok=True)
+    for old in rg_dir.glob("*.json"):
+        old.unlink()
+    sizes, name_cache = [], {}
+    for r2, kids in children.items():
+        doc = {"schemaVersion": C.SCHEMA_VERSION, "res2": r2, "cell": summaries[r2], "children": {r4: summaries[r4] for r4 in kids}}
+        keys = {k for summ in [doc["cell"], *doc["children"].values()] for lst in summ["top"].values() for k, _ in lst}
+        for k in keys:
+            if k not in name_cache:
+                name_cache[k] = name_of(k)
+        doc["names"] = {k: name_cache[k] for k in sorted(keys)}
+        b = dumps(doc)
+        (rg_dir / f"{r2}.json").write_bytes(b)
+        sizes.append(len(gzip_bytes(b)))
+    stats = {"regionFiles": len(children), "regionGzipBytesMax": max(sizes), "topAll": TOP_ALL, "topPerBin": TOP_PER_BIN}
+    (work / "region_stats.json").write_bytes(dumps(stats))
+    log(f"step 3b ok: {len(children):,} region files, largest {max(sizes) / 1e3:.0f} KB gzip")
+    return stats
+
+
+# --------------------------------------------------------------------------------------
 # Step 8 - encode density files (WSC1) and the manifest
 # --------------------------------------------------------------------------------------
 
@@ -666,6 +778,7 @@ def step8_encode(args, work: Path, out_dir: Path, dataset_id: str) -> dict:
     fstats = json.loads((work / "filter_stats.json").read_text())
     astats = json.loads((work / "aggregate_stats.json").read_text())
     sstats = json.loads((work / "species_stats.json").read_text())
+    rstats = json.loads((work / "region_stats.json").read_text())
     con = duckdb.connect((work / "agg.duckdb").as_posix(), read_only=True)
     con.execute("LOAD h3;")
     group_ids = ["all"] + [g["id"] for g in groups["groups"]]
@@ -700,14 +813,15 @@ def step8_encode(args, work: Path, out_dir: Path, dataset_id: str) -> dict:
         "largestShardBrotliBytes": max(a["brotliBytes"] for a in assets.values()),
         "speciesGzipBytesMax": sstats["speciesGzipBytesMax"],
         "searchGzipBytesMax": sstats["searchGzipBytesMax"],
+        "regionGzipBytesMax": rstats["regionGzipBytesMax"],
         "shardLimitBytes": 600_000,
     }
-    size_report["shardsOk"] = max(size_report["largestShardBrotliBytes"], sstats["speciesGzipBytesMax"], sstats["searchGzipBytesMax"]) <= 600_000
+    size_report["shardsOk"] = max(size_report["largestShardBrotliBytes"], sstats["speciesGzipBytesMax"], sstats["searchGzipBytesMax"], rstats["regionGzipBytesMax"]) <= 600_000
 
     hashes = {}
-    for sub in ("species", "search"):
+    for sub in ("species", "search", "region"):
         h = hashlib.sha256()
-        for f in sorted((out_dir / sub).glob("*.json")):
+        for f in sorted((out_dir / sub).rglob("*.json")):
             h.update(f.name.encode() + b"\0" + hashlib.sha256(f.read_bytes()).digest())
         hashes[sub] = h.hexdigest()
 
@@ -765,9 +879,11 @@ def step8_encode(args, work: Path, out_dir: Path, dataset_id: str) -> dict:
             "stages": [{"id": f, "rule": rule, "dropped": fstats["dropped"][f]} for f, rule in C.FILTERS],
             "basisDropped": fstats["basisDropped"],
             "keptWithNullUncertainty": fstats["keptWithNullUncertainty"],
+            "duplicatesRemoved": astats["duplicatesRemoved"],
+            "keptAfterDuplicates": astats["keptAnimals"],
+            "duplicateRule": "D1: the same species at the same coordinates (rounded to 5 decimal places) on the same date is counted once; undated records are never merged",
             "geospatialIssueFlags": C.GEOSPATIAL_ISSUES,
             "notApplied": [
-                "Duplicate-record removal across publishers",
                 "Outlier detection beyond GBIF's own flags",
                 "Sensitive rule 1 (share of generalised records): the snapshot has no datageneralizations column",
             ],
@@ -781,7 +897,8 @@ def step8_encode(args, work: Path, out_dir: Path, dataset_id: str) -> dict:
             "sensitive": sstats["sensitiveSpecies"],
             "conservationSource": None,
         },
-        "assets": {"cells": assets, "speciesSha256": hashes["species"], "searchSha256": hashes["search"]},
+        "assets": {"cells": assets, "speciesSha256": hashes["species"], "searchSha256": hashes["search"], "regionSha256": hashes["region"]},
+        "regions": {"lens": "animals", "files": rstats["regionFiles"], "topAll": rstats["topAll"], "topPerBin": rstats["topPerBin"]},
         "sizeReport": size_report,
         "classInventory": astats["classInventory"][:60],
         "attribution": [
@@ -816,7 +933,7 @@ def step9_test(args, work: Path, out_dir: Path) -> dict:
         check(f"sha256 {rel}", sha256((out_dir / rel).read_bytes()) == a["sha256"])
 
     # Schema validation.
-    for name, files in (("manifest", [out_dir / "manifest.json"]), ("species", sorted((out_dir / "species").glob("*.json"))), ("search", sorted((out_dir / "search").glob("*.json")))):
+    for name, files in (("manifest", [out_dir / "manifest.json"]), ("species", sorted((out_dir / "species").glob("*.json"))), ("search", sorted((out_dir / "search").glob("*.json"))), ("region", sorted((out_dir / "region" / "animals").glob("*.json")))):
         schema = json.loads((CONTRACTS / f"{name}.schema.json").read_text(encoding="utf-8"))
         bad = []
         for f in files:
@@ -854,16 +971,23 @@ def step9_test(args, work: Path, out_dir: Path) -> dict:
     con.executemany("INSERT INTO boxes VALUES (?,?,?,?,?)", [(i, b[2], b[3], b[4], b[5]) for i, b in enumerate(boxes)])
     staged = (work / "staged" / "*.parquet").as_posix()
     rows = con.execute(f"""
-      SELECT b.i, s.lat, s.lon, s.year, s.class FROM read_parquet('{staged}') s
+      SELECT b.i, s.lat, s.lon, s.year, s.class, s.specieskey, round(s.lat, 5), round(s.lon, 5), s.eventdate
+      FROM read_parquet('{staged}') s
       JOIN boxes b ON s.lat BETWEEN b.la0 AND b.la1 AND s.lon BETWEEN b.lo0 AND b.lo1
       WHERE s.stage = 'kept'""").fetchall()
     recomputed = [[0] * 9 for _ in boxes]
-    for i, lat, lon, year, cls in rows:
+    seen: set = set()
+    for i, lat, lon, year, cls, key, rlat, rlon, day in rows:
         g, c = boxes[i][0], boxes[i][1]
         if h3.str_to_int(h3.latlng_to_cell(lat, lon, 4)) != c:
             continue
         if g != "all" and class_to_group.get(cls, catch) != g:
             continue
+        if day is not None:  # D1 duplicate rule, re-implemented here
+            dup = (i, key, rlat, rlon, day)
+            if dup in seen:
+                continue
+            seen.add(dup)
         b = 0 if year < 1950 else min((year - 1950) // 10 + 1, 8)
         recomputed[i][b] += 1
     mism = [(boxes[i][0], h3.int_to_str(boxes[i][1]), recomputed[i], decoded[boxes[i][0]][boxes[i][1]]) for i in range(len(boxes)) if recomputed[i] != decoded[boxes[i][0]][boxes[i][1]]]
@@ -888,6 +1012,22 @@ def step9_test(args, work: Path, out_dir: Path) -> dict:
         if s != d["records"]["byBin"] or sum(s) != d["records"]["total"]:
             bad.append(fpath.name)
     check("species per-bin totals match cells (50 sampled)", not bad, bad[:3])
+
+    # Region files (A-05) agree with the density files: every cell's per-bin records equal the
+    # 'all' group's WSC1 counts at the same resolution, and group totals add up.
+    r2_all = decode_wsc1((out_dir / "cells/animals/all/r2.bin").read_bytes())["cells"]
+    bad = []
+    region_files = sorted((out_dir / "region" / "animals").glob("*.json"))
+    for fpath in region_files:
+        d = json.loads(fpath.read_text(encoding="utf-8"))
+        cells = [(d["res2"], d["cell"], r2_all)] + [(k, v, decoded["all"]) for k, v in d["children"].items()]
+        for cid, summ, ref in cells:
+            if summ["byBin"] != ref.get(h3.str_to_int(cid)) or sum(summ["groups"].values()) != summ["records"] or sum(summ["byBin"]) != summ["records"]:
+                bad.append(cid)
+            if any(k not in d["names"] for lst in summ["top"].values() for k, _ in lst):
+                bad.append(cid + " (name missing)")
+    check(f"region summaries match density files ({len(region_files)} files)", not bad, bad[:3])
+    check("every populated res-2 cell has a region file", {fp.stem for fp in region_files} == {h3.int_to_str(c) for c in r2_all})
 
     report["ok"] = not report["failures"]
     (work / "test_report.json").write_bytes(dumps(report))
@@ -951,7 +1091,7 @@ def dataset_id_for(args, snapshot: str) -> str:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("step", choices=["verify", "filter", "aggregate", "species", "encode", "test", "all", "publish"])
+    ap.add_argument("step", choices=["verify", "filter", "aggregate", "species", "regions", "encode", "test", "all", "publish"])
     ap.add_argument("--snapshot", default="latest", help="snapshot folder, e.g. 2026-10-01, or 'latest'")
     ap.add_argument("--country", help="ISO alpha-2 country filter (fast only when run in us-east-1)")
     ap.add_argument("--sample-every", type=int, default=0, help="read every Nth Parquet part (dev slice)")
@@ -1000,6 +1140,7 @@ def main(argv=None) -> int:
             "filter": lambda: step1_filter(args, work, schema),
             "aggregate": lambda: step23_aggregate(args, work),
             "species": lambda: step4_species(args, work, out_dir),
+            "regions": lambda: step3b_regions(args, work, out_dir),
             "encode": lambda: step8_encode(args, work, out_dir, ds),
             "test": lambda: step9_test(args, work, out_dir),
         }

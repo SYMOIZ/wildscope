@@ -1,5 +1,5 @@
 import { splitLongToH3Index } from "h3-js";
-import type { DensityFile, Manifest, SearchEntry, SpeciesDoc } from "./types";
+import type { DensityFile, Manifest, RegionFile, SearchEntry, SpeciesDoc } from "./types";
 
 const DATA_ROOT = "/data/v1";
 const SUPPORTED_SCHEMA = 1;
@@ -127,4 +127,17 @@ export async function loadConfig(): Promise<AppConfig> {
   } catch {
     return defaults;
   }
+}
+
+const regionCache = new Map<string, Promise<RegionFile>>();
+
+export function loadRegion(datasetId: string, lens: string, res2: string): Promise<RegionFile> {
+  const key = `${datasetId}/${lens}/${res2}`;
+  let p = regionCache.get(key);
+  if (!p) {
+    p = fetchWithRetry(`${datasetPath(datasetId)}region/${lens}/${res2}.json`, "the region summary").then((r) => r.json());
+    p.catch(() => regionCache.delete(key));
+    regionCache.set(key, p);
+  }
+  return p;
 }

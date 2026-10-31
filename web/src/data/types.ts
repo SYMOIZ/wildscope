@@ -54,11 +54,15 @@ export interface Manifest {
     stages: { id: string; rule: string; dropped: number }[];
     basisDropped: Record<string, number>;
     keptWithNullUncertainty: number;
+    duplicatesRemoved?: number;
+    keptAfterDuplicates?: number;
+    duplicateRule?: string;
     geospatialIssueFlags: string[];
     notApplied: string[];
   };
   species: { count: number; namesSource: string; searchPrefixes: string[]; sensitive: string[]; conservationSource: string | null };
-  assets: { cells: Record<string, CellAsset>; speciesSha256: string; searchSha256: string };
+  assets: { cells: Record<string, CellAsset>; speciesSha256: string; searchSha256: string; regionSha256?: string };
+  regions?: { lens: string; files: number; topAll: number; topPerBin: number };
   sizeReport: Record<string, number | boolean>;
   attribution: string[];
 }
@@ -99,4 +103,27 @@ export interface DensityFile {
   ids: string[];
   counts: Uint32Array; // cell-major, 9 per cell
   index: Map<string, number>;
+}
+
+/** Snapshot summary of one H3 cell (A-05). */
+export interface CellSummary {
+  records: number;
+  species: number;
+  datasets: number;
+  noUncertainty: number;
+  byBin: number[];
+  speciesByBin: number[];
+  groups: Record<string, number>;
+  /** "all" → top 20 over all years; "B00".."B08" → top 10 per bin. [speciesKey, records] */
+  top: Record<string, [string, number][]>;
+}
+
+/** Region file: one res-2 cell, its populated res-4 children, and display names for listed species. */
+export interface RegionFile {
+  schemaVersion: number;
+  res2: string;
+  cell: CellSummary;
+  children: Record<string, CellSummary>;
+  /** speciesKey → [canonical name, English vernacular | null, group, has species file] */
+  names: Record<string, [string, string | null, string, boolean]>;
 }

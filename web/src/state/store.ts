@@ -1,9 +1,12 @@
 import { create } from "zustand";
 import type { BinSel, Lens, Manifest, SpeciesDoc } from "../data/types";
 import type { AppConfig } from "../data/assets";
+import type { LiveRecord, LiveResult } from "../data/gbif";
 
 export type Mode = "density" | "effort";
-export type Panel = "none" | "species" | "cell" | "notes";
+export type Panel = "none" | "species" | "cell" | "record" | "view" | "notes";
+/** 0 = global (res 2), 1 = country/regional (res 4), 2 = local (live GBIF records). */
+export type Lod = 0 | 1 | 2;
 
 export interface Camera {
   lat: number;
@@ -21,6 +24,16 @@ export interface Toast {
   text: string;
   kind: "info" | "error";
   action?: { label: string; run: () => void };
+}
+
+export interface LiveState {
+  status: "idle" | "loading" | "ok" | "error";
+  result: LiveResult | null;
+  error: string | null;
+  /** View rectangle the result belongs to (degrees). */
+  bbox: { west: number; south: number; east: number; north: number } | null;
+  /** GBIF usage key in species mode (snapshot keys differ), null otherwise. */
+  taxonKey?: number | null;
 }
 
 export interface SearchPin {
@@ -41,7 +54,9 @@ interface State {
   normalised: boolean;
   panel: Panel;
   notesOpen: boolean;
-  lod: 0 | 1;
+  lod: Lod;
+  live: LiveState;
+  record: LiveRecord | null;
   camera: Camera | null;
   selectedCell: SelectedCell | null;
   pin: SearchPin | null;
@@ -72,6 +87,8 @@ export const useStore = create<State>((set, get) => ({
   panel: "none",
   notesOpen: false,
   lod: 0,
+  live: { status: "idle", result: null, error: null, bbox: null },
+  record: null,
   camera: null,
   selectedCell: null,
   pin: null,
@@ -115,3 +132,5 @@ export function groupsFor(m: Manifest | null, lens: Lens) {
   const l = m.lenses[lens];
   return l.built && l.groups ? l.groups : [];
 }
+
+if (import.meta.env.DEV) (window as unknown as { __wsStore: typeof useStore }).__wsStore = useStore; // debugging only

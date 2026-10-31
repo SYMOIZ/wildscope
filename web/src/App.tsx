@@ -10,7 +10,9 @@ import { CameraControls } from "./components/CameraControls";
 import { DataNotes } from "./components/DataNotes";
 import { GroupRail } from "./components/GroupRail";
 import { Legend } from "./components/Legend";
-import { CellPanel, SpeciesPanel } from "./components/Panels";
+import { CellPanel, RecordPanel, SpeciesPanel, ViewPanel } from "./components/Panels";
+import { LevelBar } from "./components/LevelBar";
+import { startLiveSync } from "./state/live";
 import { Timeline } from "./components/Timeline";
 import { TopBar } from "./components/TopBar";
 
@@ -68,7 +70,12 @@ export default function App() {
       const what = e instanceof AssetError ? e.what : "the data";
       useStore.getState().set({ banner: { text: `Could not load ${what}. Retry`, retry: () => location.reload() } });
     });
-    return startUrlSync();
+    const stopUrl = startUrlSync();
+    const stopLive = startLiveSync();
+    return () => {
+      stopUrl();
+      stopLive();
+    };
   }, [fatal]);
 
   // Arrival sequence (S01): settles after 3 s or on any input.
@@ -135,6 +142,7 @@ export default function App() {
         case "a": case "A": s.setLens("animals"); break;
         case "i": case "I": s.set({ notesOpen: !s.notesOpen }); break;
         case "n": case "N": globeApi.resetNorth(); break;
+        case "h": case "H": globeApi.home(); break;
         case "+": case "=": globeApi.zoom(1 - K.ZOOM_STEP); break;
         case "-": globeApi.zoom(1 + K.ZOOM_STEP); break;
         case "g": case "G": document.querySelector<HTMLButtonElement>("#group-rail button")?.focus(); break;
@@ -179,10 +187,10 @@ export default function App() {
 
   const groupLabel = groupsFor(st.manifest, st.lens).find((g) => g.id === st.group)?.label ?? "All";
   const binLabel = st.bin === "all" ? "All years" : st.manifest?.bins.find((b) => b.id === st.bin)?.label;
-  const panelOpen = st.panel === "species" || st.panel === "cell";
+  const panelOpen = st.panel === "species" || st.panel === "cell" || st.panel === "record" || st.panel === "view";
 
   return (
-    <div data-lens={st.lens} style={{ position: "absolute", inset: 0 }} onError={() => setFatal("render")}>
+    <div data-lens={st.lens} data-panel={panelOpen ? "open" : "closed"} style={{ position: "absolute", inset: 0 }} onError={() => setFatal("render")}>
       <Globe layer={layer} />
       {(layerLoading || st.loading > 0) && <div className="progress" role="progressbar" aria-label="Loading data" />}
       <div className={`landing${landing ? "" : " gone"}`} aria-hidden={!landing}>
@@ -198,6 +206,9 @@ export default function App() {
         <Timeline effortByBin={layer?.effortByBin ?? st.manifest?.lenses[st.lens].totalsByBin?.[st.group] ?? new Array(9).fill(0)} />
         {st.panel === "species" && <SpeciesPanel />}
         {st.panel === "cell" && <CellPanel layer={layer} />}
+        {st.panel === "record" && <RecordPanel />}
+        {st.panel === "view" && <ViewPanel />}
+        <LevelBar />
         <DataNotes />
       </div>
       {st.banner && (

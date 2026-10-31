@@ -2,13 +2,16 @@
 // Data constants (MIN_EFFORT etc.) are NOT here: they come from the manifest.
 
 export const LOD_L0_MIN_HEIGHT_M = 8_000_000; // L0 (H3 res 2) at or above this camera height
+export const LOD_L2_MAX_HEIGHT_M = 1_200_000; // L2 (live GBIF records) below this height; L1 (res 4) between
 export const LOD_HYSTERESIS = 0.1;
-export const CAMERA_MIN_HEIGHT_M = 200_000;
+export const CAMERA_MIN_HEIGHT_M = 1_000; // close-up level; satellite tiles go to zoom 16
 export const CAMERA_MAX_HEIGHT_M = 25_000_000;
 export const ARRIVAL_START_HEIGHT_M = 20_000_000;
 export const ARRIVAL_END_HEIGHT_M = 12_000_000;
 export const ARRIVAL_MS = 3000;
 export const FLY_TO_POINT_HEIGHT_M = 1_500_000;
+export const LIVE_DEBOUNCE_MS = 450;
+export const CLUSTER_PIXEL_RANGE = 36;
 export const FEW_CELLS_HEIGHT_M = 2_500_000;
 export const FIT_PADDING = 0.12;
 export const ROTATE_STEP_DEG = 5;
@@ -20,9 +23,11 @@ export const PLACE_MIN_CHARS = 3;
 export const SPECIES_MIN_CHARS = 2;
 export const MAX_SPECIES_RESULTS = 8;
 export const MAX_PLACE_RESULTS = 5;
-export const DATA_LAYER_ALPHA = 0.78;
-export const IMAGERY_BRIGHTNESS = 0.55;
-export const IMAGERY_SATURATION = 0.7;
+/** Data-layer opacity per zoom level: global, regional, local (outlines). */
+export const DATA_LAYER_ALPHA = [0.62, 0.55, 0.35] as const;
+// Imagery at near-natural brightness: the data layer is translucent instead of the basemap being dimmed.
+export const IMAGERY_BRIGHTNESS = 0.95;
+export const IMAGERY_SATURATION = 1.0;
 export const EXTENT_QUANTILE = 0.01; // central 98% of record positions
 export const MIN_CELLS_FOR_FIT = 5;
 

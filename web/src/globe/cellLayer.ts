@@ -6,6 +6,8 @@ export interface CellValues {
   ids: string[];
   colors: string[]; // CSS colour per cell, "" for hatched
   hatched: boolean[];
+  /** fill: solid cells (global); fill-edged: cells with thin edges (regional); outline: edges only (local). */
+  style: "fill" | "fill-edged" | "outline";
 }
 
 interface Poly {
@@ -82,8 +84,10 @@ export class CellImageryProvider {
   readonly ready = true;
   readonly readyPromise = Promise.resolve(true);
   private buckets = new Map<string, Poly[]>();
+  private style: CellValues["style"];
 
   constructor(values: CellValues) {
+    this.style = values.style;
     for (let i = 0; i < values.ids.length; i++) {
       const b = boundary(values.ids[i]);
       for (const shift of b.east > 180 ? [0, -360] : [0]) {
@@ -140,14 +144,22 @@ export class CellImageryProvider {
           if (p.hatched) {
             hatch ??= hatchPattern(ctx);
             ctx.fillStyle = hatch ?? "rgba(124,136,127,0.25)";
+            ctx.fill();
+          } else if (this.style === "outline") {
+            // Local level: faint tint plus a clear edge, so imagery and record points stay readable.
+            ctx.globalAlpha = 0.12;
+            ctx.fillStyle = p.color;
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            ctx.strokeStyle = p.color;
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
           } else {
             ctx.fillStyle = p.color;
-          }
-          ctx.fill();
-          // Close hairline gaps between neighbouring cells caused by anti-aliasing.
-          if (!p.hatched) {
-            ctx.strokeStyle = p.color;
-            ctx.lineWidth = 0.6;
+            ctx.fill();
+            // Close hairline gaps from anti-aliasing; regional level adds a thin dark edge per cell.
+            ctx.strokeStyle = this.style === "fill-edged" ? "rgba(6,16,13,0.45)" : p.color;
+            ctx.lineWidth = this.style === "fill-edged" ? 0.75 : 0.6;
             ctx.stroke();
           }
         }

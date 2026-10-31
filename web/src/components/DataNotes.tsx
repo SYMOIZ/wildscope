@@ -53,7 +53,11 @@ export function DataNotes() {
           {f.stages.map((s) => (
             <tr key={s.id}><td><span className="mono">{s.id}</span> {s.rule}</td><td className="n"><Num value={s.dropped} source="A-01" exact /></td></tr>
           ))}
-          <tr><td><strong>Kept (Animals lens)</strong></td><td className="n"><strong><Num value={f.kept} source="A-01" exact /></strong></td></tr>
+          <tr><td>Kept after F1–F9 (Animals lens)</td><td className="n"><Num value={f.kept} source="A-01" exact /></td></tr>
+          {f.duplicatesRemoved !== undefined && (
+            <tr><td><span className="mono">D1</span> {f.duplicateRule}</td><td className="n"><Num value={f.duplicatesRemoved} source="A-01" exact /></td></tr>
+          )}
+          <tr><td><strong>Records counted</strong></td><td className="n"><strong><Num value={f.keptAfterDuplicates ?? f.kept} source="A-01" exact /></strong></td></tr>
           <tr><td>Kept with no stated coordinate uncertainty</td><td className="n"><Num value={f.keptWithNullUncertainty} source="A-01" exact /></td></tr>
         </tbody>
       </table>
@@ -94,6 +98,21 @@ export function DataNotes() {
         <li>The licence filter removes CC BY-NC records, which shifts coverage for some taxa and countries.</li>
         <li>There are no absence data: a cell without records says nothing about whether a species is present.</li>
       </ol>
+
+      <h3>Zoom levels and sources</h3>
+      <ul>
+        <li><strong>Global and regional</strong> (camera above 1,200 km): H3 cells counted from the snapshot above. Clicking a cell opens its summary from the same build.</li>
+        <li><strong>Local</strong> (below 1,200 km): individual records fetched live from the GBIF occurrence API (api.gbif.org) for the area in view, with the same licence, coordinate, presence and basis filters, and coordinate uncertainty up to 10 km (records without a stated uncertainty are left out of this layer). Every matching record is drawn as a small dot from GBIF's map service (same filters; positions snapped to the tile's pixel grid), and up to 300 of them are drawn as larger points you can click. The status bar gives GBIF's total for the view. For Other invertebrates there is no single GBIF taxon to filter the dots, so only the clickable points are shown.</li>
+        <li>Live counts come from GBIF's index today and are never added to snapshot counts. Photographs are shown only when the image itself is licensed CC0 or CC BY, through GBIF's image cache, with the creator named.</li>
+        <li>IUCN categories come from GBIF (the species API, or the category carried on a record). GBIF does not give the assessment year, so none is shown.</li>
+        <li>Your view's coordinates are sent to api.gbif.org to fetch local records; nothing else about you is sent.</li>
+      </ul>
+
+      <h3>Imagery date</h3>
+      <p className="small">
+        Satellite imagery comes from Amazon Location Service and is a mosaic of images taken at different, unstated times. Its date has nothing to do
+        with the record dates: the timeline filters records only, never imagery.
+      </p>
 
       <h3>What this build does not show</h3>
       <p className="small">

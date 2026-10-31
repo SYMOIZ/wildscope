@@ -4,9 +4,11 @@ import { cellToBoundary, latLngToCell } from "h3-js";
 import { useEffect, useRef, useState } from "react";
 import * as K from "../config/interaction";
 import { fmtExact, fmtShare } from "../data/format";
+import { densityTileUrl, groupOfClass, type LiveRecord } from "../data/gbif";
 import { useStore } from "../state/store";
 import { readUrl } from "../state/url";
 import { CellImageryProvider } from "./cellLayer";
+import { heightToLod } from "./lod";
 import type { Layer } from "./layerModel";
 
 Cesium.Ion.defaultAccessToken = ""; // No Cesium ion imagery or terrain (DATA §13).
@@ -40,6 +42,18 @@ export const globeApi = {
       duration: K.reducedMotion() ? 0 : 0.48,
     });
   },
+  /** Back to the whole-globe view. */
+  home() {
+    viewer?.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(20, 15, K.ARRIVAL_END_HEIGHT_M), duration: flyDuration() });
+  },
+  /** Current view rectangle in degrees, or null when the camera sees space around the globe. */
+  viewRect(): { west: number; south: number; east: number; north: number } | null {
+    if (!viewer) return null;
+    const r = viewer.camera.computeViewRectangle(viewer.scene.globe.ellipsoid);
+    if (!r) return null;
+    const d = Cesium.Math.toDegrees;
+    return { west: d(r.west), south: d(r.south), east: d(r.east), north: d(r.north) };
+  },
   rotate(dLonDeg: number, dLatDeg: number) {
     if (!viewer) return;
     const c = viewer.camera.positionCartographic;
@@ -52,11 +66,36 @@ function flyDuration() {
   return K.reducedMotion() ? 0 : 1.8;
 }
 
-function heightToLod(height: number, current: 0 | 1): 0 | 1 {
-  const t = K.LOD_L0_MIN_HEIGHT_M;
-  if (current === 0 && height < t * (1 - K.LOD_HYSTERESIS)) return 1;
-  if (current === 1 && height > t * (1 + K.LOD_HYSTERESIS)) return 0;
-  return current;
+/** Categorical colours for record points by group (distinct in hue and lightness; always paired with the legend). */
+export const GROUP_COLORS: Record<string, string> = {
+  mammals: "#E3A857",
+  birds: "#7FD1C7",
+  reptiles: "#9CC96B",
+  amphibians: "#4B9CD3",
+  fishes: "#8FA8FF",
+  insects: "#F5AC85",
+  other_invertebrates: "#D9C2F0",
+};
+
+function clusterImage(count: number): HTMLCanvasElement {
+  const label = count >= 1000 ? `${Math.round(count / 100) / 10}k` : String(count);
+  const r = count < 10 ? 13 : count < 100 ? 16 : 19;
+  const c = document.createElement("canvas");
+  c.width = c.height = r * 2 + 4;
+  const g = c.getContext("2d")!;
+  g.beginPath();
+  g.arc(r + 2, r + 2, r, 0, Math.PI * 2);
+  g.fillStyle = "rgba(12,26,22,0.88)";
+  g.fill();
+  g.lineWidth = 2;
+  g.strokeStyle = "#EDE8DC";
+  g.stroke();
+  g.fillStyle = "#EDE8DC";
+  g.font = "600 12px Inter, sans-serif";
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.fillText(label, r + 2, r + 3);
+  return c;
 }
 
 async function makeBasemap(region: string, key: string | null, onFallback: (why: string) => void): Promise<Cesium.ImageryLayer> {
@@ -98,7 +137,9 @@ function styleBasemap(l: Cesium.ImageryLayer) {
 interface Hover {
   x: number;
   y: number;
-  id: string;
+  id?: string; // cell
+  record?: LiveRecord;
+  cluster?: number;
 }
 
 export function Globe({ layer }: { layer: Layer | null }) {
@@ -144,6 +185,7 @@ export function Globe({ layer }: { layer: Layer | null }) {
       selectionIndicator: false, requestRenderMode: true, showRenderLoopErrors: false, maximumRenderTimeChange: Infinity,
     });
     viewer = v;
+    if (import.meta.env.DEV) (window as unknown as { __wsViewer: Cesium.Viewer }).__wsViewer = v; // debugging only
     const scene = v.scene;
     scene.globe.baseColor = Cesium.Color.fromCssColorString("#0C1A16");
     scene.backgroundColor = Cesium.Color.fromCssColorString("#06100D");
@@ -176,20 +218,46 @@ export function Globe({ layer }: { layer: Layer | null }) {
       return latLngToCell(Cesium.Math.toDegrees(c.latitude), Cesium.Math.toDegrees(c.longitude), lyr.res);
     };
 
+    // Record points and clusters first (local level), then H3 cells.
+    const pickRecord = (pos: Cesium.Cartesian2): { record?: LiveRecord; cluster?: Cesium.Entity[] } | null => {
+      const picked = scene.pick(pos);
+      const id = picked?.id;
+      if (Array.isArray(id)) return { cluster: id as Cesium.Entity[] };
+      if (id instanceof Cesium.Entity && id.properties?.record) return { record: id.properties.record.getValue() as LiveRecord };
+      return null;
+    };
+
     const h = new Cesium.ScreenSpaceEventHandler(v.canvas);
     let hoverTimer = 0;
     h.setInputAction((m: { endPosition: Cesium.Cartesian2 }) => {
       window.clearTimeout(hoverTimer);
       const pos = m.endPosition;
       hoverTimer = window.setTimeout(() => {
+        const rec = pickRecord(pos);
+        if (rec?.record) return setHover({ x: pos.x, y: pos.y, record: rec.record });
+        if (rec?.cluster) return setHover({ x: pos.x, y: pos.y, cluster: rec.cluster.length });
         const id = pickCell(pos);
         setHover(id && layerRef.current?.info.has(id) ? { x: pos.x, y: pos.y, id } : null);
       }, K.TOOLTIP_DELAY_MS);
     }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
     h.setInputAction(() => setHover(null), Cesium.ScreenSpaceEventType.LEFT_DOWN);
     h.setInputAction((m: { position: Cesium.Cartesian2 }) => {
-      const id = pickCell(m.position);
       const s = useStore.getState();
+      const rec = pickRecord(m.position);
+      if (rec?.record) {
+        s.set({ record: rec.record, panel: "record" });
+        return;
+      }
+      if (rec?.cluster) {
+        // Zoom towards the cluster so it splits into its records.
+        const pts = rec.cluster.map((e) => Cesium.Cartographic.fromCartesian(e.position!.getValue(Cesium.JulianDate.now())!));
+        const lat = pts.reduce((a, p) => a + p.latitude, 0) / pts.length;
+        const lon = pts.reduce((a, p) => a + p.longitude, 0) / pts.length;
+        const height = Math.max(K.CAMERA_MIN_HEIGHT_M * 2, v.camera.positionCartographic.height / 3);
+        v.camera.flyTo({ destination: Cesium.Cartesian3.fromRadians(lon, lat, height), duration: flyDuration() * 0.6 });
+        return;
+      }
+      const id = pickCell(m.position);
       if (!id || !layerRef.current?.info.has(id) || s.selectedCell?.id === id) {
         s.set({ selectedCell: null, panel: s.panel === "cell" ? (s.species ? "species" : "none") : s.panel });
       } else {
@@ -201,7 +269,9 @@ export function Globe({ layer }: { layer: Layer | null }) {
       const cart = ray && scene.globe.pick(ray, scene);
       if (!cart) return;
       const c = Cesium.Cartographic.fromCartesian(cart);
-      globeApi.flyToPoint(Cesium.Math.toDegrees(c.latitude), Cesium.Math.toDegrees(c.longitude));
+      // Each double-click goes a quarter of the way down, like a map's zoom-in, never below the floor.
+      const height = Math.max(K.CAMERA_MIN_HEIGHT_M * 2, Math.min(K.FLY_TO_POINT_HEIGHT_M, v.camera.positionCartographic.height / 4));
+      globeApi.flyToPoint(Cesium.Math.toDegrees(c.latitude), Cesium.Math.toDegrees(c.longitude), height);
     }, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
 
     // Initial camera: URL camera if present, else the arrival sequence (S01).
@@ -266,8 +336,10 @@ export function Globe({ layer }: { layer: Layer | null }) {
       v.scene.requestRender();
       return;
     }
+    const alpha = K.DATA_LAYER_ALPHA[layer.lod];
+    const oldAlpha = old?.alpha ?? 0;
     const next = new Cesium.ImageryLayer(new CellImageryProvider(layer.draw) as unknown as Cesium.ImageryProvider);
-    next.alpha = K.reducedMotion() ? K.DATA_LAYER_ALPHA : 0;
+    next.alpha = K.reducedMotion() ? alpha : 0;
     v.imageryLayers.add(next);
     dataLayer.current = next;
     if (K.reducedMotion()) {
@@ -279,8 +351,8 @@ export function Globe({ layer }: { layer: Layer | null }) {
     let raf = 0;
     const step = () => {
       const t = Math.min(1, (performance.now() - start) / 480);
-      next.alpha = K.DATA_LAYER_ALPHA * t;
-      if (old) old.alpha = K.DATA_LAYER_ALPHA * (1 - t);
+      next.alpha = alpha * t;
+      if (old) old.alpha = oldAlpha * (1 - t);
       if (v.isDestroyed()) return;
       v.scene.requestRender();
       if (t < 1) raf = requestAnimationFrame(step);
@@ -291,7 +363,7 @@ export function Globe({ layer }: { layer: Layer | null }) {
       cancelAnimationFrame(raf);
       if (v.isDestroyed()) return;
       if (old && v.imageryLayers.contains(old)) v.imageryLayers.remove(old);
-      next.alpha = K.DATA_LAYER_ALPHA;
+      next.alpha = alpha;
     };
   }, [layer, ready]);
 
@@ -319,11 +391,106 @@ export function Globe({ layer }: { layer: Layer | null }) {
     };
   }, [selectedCell, pin]);
 
+  // Local level: individual GBIF records in view, clustered by screen distance.
+  const live = useStore((s) => s.live);
+  const lod = useStore((s) => s.lod);
+  const selectedRecord = useStore((s) => s.record);
+  const recordsSource = useRef<Cesium.CustomDataSource | null>(null);
+  useEffect(() => {
+    if (!viewer || !ready) return;
+    const v = viewer;
+    const ds = new Cesium.CustomDataSource("records");
+    ds.clustering.enabled = true;
+    ds.clustering.pixelRange = K.CLUSTER_PIXEL_RANGE;
+    ds.clustering.minimumClusterSize = 3;
+    ds.clustering.clusterEvent.addEventListener((entities, cluster) => {
+      cluster.label.show = false;
+      cluster.billboard.show = true;
+      cluster.billboard.setImage(`cluster-${entities.length}`, clusterImage(entities.length));
+      cluster.billboard.id = entities; // Cesium leaves cluster ids empty; picking needs the member records
+      cluster.billboard.verticalOrigin = Cesium.VerticalOrigin.CENTER;
+      cluster.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+    });
+    void v.dataSources.add(ds);
+    recordsSource.current = ds;
+    return () => {
+      recordsSource.current = null;
+      if (!v.isDestroyed()) void v.dataSources.remove(ds, true);
+    };
+  }, [ready]);
+
+  // Local level: all matching records as GBIF density dots, under the clickable records.
+  const group = useStore((s) => s.group);
+  const lens = useStore((s) => s.lens);
+  const speciesOn = useStore((s) => !!s.species);
+  const liveTaxon = live.taxonKey ?? null;
+  useEffect(() => {
+    if (!viewer || !ready || !manifest || lod !== 2 || lens !== "animals") return;
+    if (!speciesOn && group === "other_invertebrates") return; // no single GBIF key: tiles would show all animals
+    if (speciesOn && !liveTaxon) return; // wait until the species is matched to GBIF
+    const v = viewer;
+    const provider = new Cesium.UrlTemplateImageryProvider({
+      url: densityTileUrl({ group, bin, bins: manifest.bins, taxonKey: speciesOn ? liveTaxon : null }),
+      tilingScheme: new Cesium.WebMercatorTilingScheme(),
+      tileWidth: 512,
+      tileHeight: 512,
+      maximumLevel: 16,
+      credit: new Cesium.Credit("Record density: GBIF.org"),
+    });
+    const layer = v.imageryLayers.addImageryProvider(provider);
+    layer.alpha = 0.9;
+    v.scene.requestRender();
+    return () => {
+      if (!v.isDestroyed() && v.imageryLayers.contains(layer)) v.imageryLayers.remove(layer);
+    };
+  }, [ready, manifest, lod, lens, group, bin, speciesOn, liveTaxon]);
+
+  useEffect(() => {
+    const ds = recordsSource.current;
+    if (!viewer || !ds) return;
+    const groups = manifest?.lenses.animals.groups ?? [];
+    ds.entities.suspendEvents();
+    ds.entities.removeAll();
+    const show = lod === 2 && live.status !== "error" && live.result;
+    if (show && live.result) {
+      for (const r of live.result.records) {
+        const color = Cesium.Color.fromCssColorString(GROUP_COLORS[groupOfClass(r.className, groups)] ?? "#EDE8DC");
+        const selected = selectedRecord?.key === r.key;
+        ds.entities.add({
+          id: `rec-${r.key}`,
+          position: Cesium.Cartesian3.fromDegrees(r.lon, r.lat),
+          point: {
+            pixelSize: selected ? 14 : 9,
+            color,
+            outlineColor: Cesium.Color.fromCssColorString(selected ? "#F4D58D" : "#06100D"),
+            outlineWidth: selected ? 3 : 1.5,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+          properties: { record: r },
+        });
+      }
+    }
+    ds.entities.resumeEvents();
+    viewer.scene.requestRender();
+  }, [live, lod, selectedRecord, manifest]);
+
   const binLabel = bin === "all" ? "All years" : manifest?.bins.find((b) => b.id === bin)?.label ?? bin;
-  const c = hover && layer?.info.get(hover.id);
+  const c = hover?.id ? layer?.info.get(hover.id) : undefined;
   return (
     <div className="globe-wrap">
       <div ref={el} className="globe" />
+      {hover?.record && (
+        <div className="tooltip" style={{ left: hover.x + 12, top: hover.y + 12 }} role="status" data-source="LIVE">
+          <span className="sci">{hover.record.species ?? hover.record.scientificName}</span>
+          <span className="mono"> · {hover.record.eventDate?.slice(0, 10) ?? "date not given"}</span>
+          {hover.record.photos.length > 0 && <span className="muted"> · photo</span>}
+        </div>
+      )}
+      {hover?.cluster && (
+        <div className="tooltip mono" style={{ left: hover.x + 12, top: hover.y + 12 }} role="status" data-source="LIVE">
+          {fmtExact(hover.cluster)} records close together · click to zoom in
+        </div>
+      )}
       {hover && c && (
         <div className="tooltip mono" style={{ left: hover.x + 12, top: hover.y + 12 }} role="status" data-source="A-02">
           {fmtExact(c.records)} recorded occurrences · {binLabel}

@@ -13,11 +13,14 @@ const rules = [
   { re: /\bhabitat\b/i, why: "SI-04" },
   { re: /\bdisappeared\b|\bnone live\b|\bfirst appeared\b|\bdiscovered\b|\bpopulation\b/i, why: "content style / SI-07" },
 ];
+// SI-02: IUCN category names (incl. EX/EW) may appear only in the conservation chip module.
+const allowExtinct = /components[\\/]Conservation\.tsx$/;
 let bad = 0;
 
 function check(p) {
   fs.readFileSync(p, "utf8").split(/\r?\n/).forEach((line, i) => {
     for (const r of rules) {
+      if (r.re === rules[0].re && allowExtinct.test(p)) continue;
       if (r.re.test(line)) {
         console.error(`${p}:${i + 1}: "${line.trim()}" (${r.why})`);
         bad++;
