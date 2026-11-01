@@ -7,6 +7,7 @@ import { fmtExact, fmtShare } from "../data/format";
 import { densityTileUrl, groupOfClass, type LiveRecord } from "../data/gbif";
 import { useStore } from "../state/store";
 import { readUrl } from "../state/url";
+import { BasemapHealth } from "./basemapHealth";
 import { CellImageryProvider } from "./cellLayer";
 import { heightToLod } from "./lod";
 import type { Layer } from "./layerModel";
@@ -112,19 +113,30 @@ async function makeBasemap(region: string, key: string | null, onFallback: (why:
     credit: new Cesium.Credit("Basemap: Amazon Location Service"),
   });
   const layer = new Cesium.ImageryLayer(provider);
-  let errors = 0;
+  // Count tiles that load, so occasional failures after imagery has worked never trigger the fallback.
+  const health = new BasemapHealth();
+  const request = provider.requestImage.bind(provider);
+  provider.requestImage = (x, y, level, req) => {
+    const p = request(x, y, level, req);
+    void p?.then(() => health.tileLoaded(), () => undefined);
+    return p;
+  };
   provider.errorEvent.addEventListener((err: Cesium.TileProviderError) => {
-    errors++;
-    if (errors === 6 && viewer) {
-      err.retry = false;
-      void fallback().then((fb) => {
-        if (!viewer) return;
-        styleBasemap(fb);
-        viewer.imageryLayers.remove(layer);
-        viewer.imageryLayers.add(fb, 0);
-        onFallback("Amazon Location basemap tiles failed to load; showing the bundled Natural Earth imagery.");
-      });
-    }
+    const decision = health.tileFailed(err.timesRetried);
+    err.retry = decision === "retry";
+    if (decision !== "fallback" || !viewer) return;
+    void fallback().then((fb) => {
+      if (!viewer || viewer.isDestroyed()) return;
+      styleBasemap(fb);
+      if (viewer.imageryLayers.contains(layer)) viewer.imageryLayers.remove(layer);
+      viewer.imageryLayers.add(fb, 0);
+      viewer.scene.requestRender();
+      onFallback(
+        health.successes === 0
+          ? "Satellite imagery could not be loaded (the map service refused or did not answer). Showing the bundled Natural Earth imagery; records and data are unaffected."
+          : "Satellite imagery stopped loading. Showing the bundled Natural Earth imagery; records and data are unaffected.",
+      );
+    });
   });
   return layer;
 }

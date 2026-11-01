@@ -148,3 +148,38 @@ describe("number formatting", () => {
     expect(fmtCount(1_234_567)).toBe("1.2 M");
   });
 });
+
+describe("basemap fallback", () => {
+  it("retries a failed tile before counting it", async () => {
+    const { BasemapHealth, TILE_RETRIES } = await import("./globe/basemapHealth");
+    const h = new BasemapHealth();
+    for (let i = 0; i < TILE_RETRIES; i++) expect(h.tileFailed(i)).toBe("retry");
+    expect(h.tileFailed(TILE_RETRIES)).toBe("skip");
+    expect(h.failedTiles).toBe(1);
+  });
+  it("falls back when tiles fail and none has ever loaded (key refused, service blocked)", async () => {
+    const { BasemapHealth, TILE_RETRIES, FAIL_BEFORE_ANY_SUCCESS } = await import("./globe/basemapHealth");
+    const h = new BasemapHealth();
+    const results = Array.from({ length: FAIL_BEFORE_ANY_SUCCESS }, () => h.tileFailed(TILE_RETRIES));
+    expect(results.at(-1)).toBe("fallback");
+    expect(h.tileFailed(TILE_RETRIES)).toBe("skip"); // only once
+  });
+  it("never falls back for scattered failures once imagery has loaded", async () => {
+    const { BasemapHealth, TILE_RETRIES } = await import("./globe/basemapHealth");
+    const h = new BasemapHealth();
+    const decisions: string[] = [];
+    for (let i = 0; i < 500; i++) {
+      h.tileLoaded();
+      if (i % 5 === 0) decisions.push(h.tileFailed(TILE_RETRIES)); // 20% of tiles drop after retries
+    }
+    expect(decisions).not.toContain("fallback");
+  });
+  it("falls back if the service goes away mid-visit", async () => {
+    const { BasemapHealth, TILE_RETRIES, CONSECUTIVE_FAILS_AFTER_SUCCESS } = await import("./globe/basemapHealth");
+    const h = new BasemapHealth();
+    h.tileLoaded();
+    let last = "";
+    for (let i = 0; i < CONSECUTIVE_FAILS_AFTER_SUCCESS; i++) last = h.tileFailed(TILE_RETRIES);
+    expect(last).toBe("fallback");
+  });
+});
