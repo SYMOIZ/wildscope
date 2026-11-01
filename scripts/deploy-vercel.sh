@@ -2,6 +2,8 @@
 # Publish the same WildScope app on Vercel. Vercel serves only the static app; /data/* and /api/* are
 # proxied to the CloudFront distribution, so there is one copy of the data and one API.
 # Requires: a completed AWS deploy (scripts/deploy.sh) and `vercel login`.
+# Keep the Vercel project disconnected from Git (`vercel git disconnect`): a Git-triggered build deploys
+# the repository root, which has no built index.html, and replaces production with a 404.
 # Usage: CLOUDFRONT_URL=https://d2za8aq0bl0uib.cloudfront.net bash scripts/deploy-vercel.sh
 set -euo pipefail
 
