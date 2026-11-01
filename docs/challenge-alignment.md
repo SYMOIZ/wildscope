@@ -54,8 +54,7 @@ sample; resolution 6 cells were not built; no worker-thread rendering yet.
 `lambda/tests/`, `infra/wildscope.yaml`.
 
 **Could improve:** no end-to-end browser tests, no accessibility audit, no CI/CD (manual deploys), no
-measured frame rates. One known display bug (long recorder IDs overflow the record card) is fixed in the
-repository but not yet deployed.
+measured frame rates.
 
 ## 3. Usefulness and impact (25%)
 
@@ -94,6 +93,5 @@ download of results; English only.
 
 1. Push the repository to a public GitHub repo and add its URL to the README.
 2. Record the demo video from [demo-script.md](demo-script.md) (under 3 minutes).
-3. Deploy the pending CSS fix for long record values (`SKIP_DATA=1 bash scripts/deploy.sh`), after approval.
-4. Optionally run the full-snapshot build (`make data-aws REPO_URL=…`) so the snapshot layers are complete.
-5. Confirm the AWS Budgets email subscription.
+3. Optionally run the full-snapshot build (`make data-aws REPO_URL=…`) so the snapshot layers are complete.
+4. Confirm the AWS Budgets email subscription.

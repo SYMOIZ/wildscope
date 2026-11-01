@@ -331,8 +331,6 @@ measured frame rates.
 - The CSP allows `'unsafe-eval'` for scripts from this origin only, because CesiumJS bundles Knockout.
 - Per-IP rate limits need AWS WAF, which is not deployed; the API stage is throttled instead.
 - JavaScript bundle is about 1.3 MB gzipped (mostly CesiumJS).
-- **Known display bug in production:** a record whose "Recorded by" value is one long unbroken string
-  pushes the other details out of view. Fixed in the repository (CSS wrap), not yet deployed.
 
 ## Future improvements
 
