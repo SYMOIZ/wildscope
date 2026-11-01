@@ -300,11 +300,15 @@ Resources:
       KeyName: !Sub "wildscope-${Env}-maps"
       Description: Browser key for Amazon Location Maps tiles only, restricted to the site referrer.
       NoExpiry: true
+      # Amazon Location rejects changes to a key used in the last 7 days unless this is set. Only set it
+      # for changes that keep existing referrers (adding a site), never ones that remove access.
+      ForceUpdate: true
       Restrictions:
         AllowActions: ["geo-maps:GetTile"]
         AllowResources: [!Sub "arn:aws:geo-maps:${AWS::Region}::provider/default"]
         AllowReferers:
           - !Sub "https://${Distribution.DomainName}/*"
+          - "https://wildscope.vercel.app/*" # same app also published on Vercel (data and API proxied to CloudFront)
           - "http://localhost:5173/*"
           - "http://localhost:4173/*"
 

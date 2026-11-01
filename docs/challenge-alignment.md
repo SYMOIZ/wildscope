@@ -11,8 +11,8 @@ strengths; no scores are claimed.
 | Dataset description | Done: README "Dataset", Data notes in the app |
 | How data is placed on the map; which AWS location/data service and why | Done: README "Architecture" and "AWS services"; [architecture.md](architecture.md) |
 | At least one AWS service in the app or pipeline | Done: Amazon Location (Maps v2 + Places v2), CloudFront, S3, API Gateway, Lambda, CloudWatch, Budgets, CloudFormation; GBIF read from the Registry of Open Data on AWS |
-| Live link | Done: https://d2za8aq0bl0uib.cloudfront.net |
-| Public code repository | **Not done.** Code is committed locally; it still has to be pushed to a public GitHub repo |
+| Live link | Done: https://d2za8aq0bl0uib.cloudfront.net (AWS) and https://wildscope.vercel.app (same app on Vercel) |
+| Public code repository | **Pushed to https://github.com/SYMOIZ/wildscope, currently private.** Switch it to public before submitting |
 | Demo video under 3 minutes | **Not done.** Script and shot list in [demo-script.md](demo-script.md); nothing has been recorded |
 | Previously unpublished work, eligibility | For the entrant to confirm |
 
@@ -91,7 +91,7 @@ download of results; English only.
 
 ## Actions before public submission
 
-1. Push the repository to a public GitHub repo and add its URL to the README.
+1. Make https://github.com/SYMOIZ/wildscope public.
 2. Record the demo video from [demo-script.md](demo-script.md) (under 3 minutes).
 3. Optionally run the full-snapshot build (`make data-aws REPO_URL=…`) so the snapshot layers are complete.
 4. Confirm the AWS Budgets email subscription.

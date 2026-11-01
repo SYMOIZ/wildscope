@@ -1,6 +1,10 @@
 # WildScope — where animals have been recorded
 
-**Live:** https://d2za8aq0bl0uib.cloudfront.net
+| | |
+|---|---|
+| **Live on AWS** (CloudFront) | https://d2za8aq0bl0uib.cloudfront.net |
+| **Live on Vercel** (same app; data and API served by the AWS deployment) | https://wildscope.vercel.app |
+| **Source code** | https://github.com/SYMOIZ/wildscope |
 
 WildScope is a 3D globe for exploring **recorded animal occurrences** from the
 [GBIF](https://www.gbif.org) occurrence snapshot hosted in the
@@ -236,7 +240,7 @@ Requirements: Python 3.12 or 3.13, Node.js 20+, Git Bash/WSL/macOS/Linux, and `m
 target is a plain command).
 
 ```bash
-git clone <this-repo> wildscope && cd wildscope
+git clone https://github.com/SYMOIZ/wildscope.git && cd wildscope
 python -m venv .venv
 .venv/Scripts/python -m pip install -r pipeline/requirements.txt pyflakes cfn-lint   # use .venv/bin/python on macOS/Linux
 npm --prefix web ci
@@ -293,7 +297,19 @@ publishes the latest data build (step 10 refuses to publish if step 9 failed) �
 Full-snapshot data (runs in us-east-1 next to the data; the repository must be public):
 
 ```bash
-make data-aws REPO_URL=https://github.com/<you>/<repo>.git
+make data-aws REPO_URL=https://github.com/SYMOIZ/wildscope.git
+```
+
+### Also on Vercel
+
+https://wildscope.vercel.app serves the same built app from Vercel. Vercel rewrites `/data/*` and
+`/api/*` to the CloudFront distribution, so the data, place search and caching are the AWS deployment's;
+Vercel adds no copy of the data and no second API. It sends the same security headers. The Amazon
+Location key allows `https://wildscope.vercel.app/*` as a referrer (`infra/wildscope.yaml`), so the
+satellite basemap works there too.
+
+```bash
+bash scripts/deploy-vercel.sh   # after scripts/deploy.sh and `vercel login`
 ```
 
 ## Testing and validation
@@ -307,7 +323,8 @@ Results from the latest run on 2026-11-01 (commands in [docs/REVIEW.md](docs/REV
 | Lambda unit tests (stubbed Amazon Location) | **4/4 pass** |
 | ESLint + wording lint (forbidden words such as "extinct", "vanished", "range") + TypeScript | pass |
 | pyflakes, cfn-lint, CSP consistency (app = CloudFront) | pass |
-| Live checks: `/`, `/api/v1/health`, `/api/v1/geo/search?q=Lahore` → "Lahore, Pakistan", every density file's SHA-256 matches its manifest (16/16), security headers present | pass |
+| Live checks on CloudFront: `/`, `/api/v1/health`, `/api/v1/geo/search?q=Lahore` → "Lahore, Pakistan", every density file's SHA-256 matches its manifest (16/16), security headers present | pass |
+| Live checks on Vercel: same app, proxied data (16/16 density files match the manifest), place search, health, CSP/HSTS headers, satellite tiles accepted for the Vercel referrer | pass |
 | Manual browser tests (zoom levels, groups, species mode, record cards, cell panel, timeline filter, Data notes, phone width, production build under the production CSP) | pass; bugs found and fixed are listed in [docs/REVIEW.md](docs/REVIEW.md) |
 
 Not done: automated end-to-end browser tests, accessibility audit with a screen reader, load tests, and

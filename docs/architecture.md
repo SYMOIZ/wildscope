@@ -192,6 +192,12 @@ flowchart LR
     PUB --> INV
 ```
 
-There is no CI/CD pipeline; deployment is manual from a workstation. The Amazon Location key value is
+There is no CI/CD pipeline; deployment is manual from a workstation.
+
+**Vercel mirror.** `scripts/deploy-vercel.sh` publishes the same built app to https://wildscope.vercel.app.
+Vercel rewrites `/data/*` and `/api/*` to the CloudFront distribution, so data, place search and caching
+stay on AWS; only `index.html`, JS/CSS, Cesium assets and `config.json` are served by Vercel, with the
+same security headers. The Maps key lists the Vercel domain as an allowed referrer; adding it needed
+`ForceUpdate: true` because Amazon Location rejects changes to a key used in the last 7 days otherwise. The Amazon Location key value is
 never committed (`web/public/config.json` is git-ignored) and is limited to tile requests from the
 site's referrer.
