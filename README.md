@@ -35,6 +35,8 @@ engineering specification is in [`wildscope-product-blueprint/`](wildscope-produ
 14. [Deployment](#deployment) · 15. [Testing](#testing-and-validation) · 16. [Limitations](#performance-and-known-limitations) ·
 17. [Future work](#future-improvements) · 18. [License](#license-and-acknowledgements)
 
+**Judges:** start with the [challenge submission write-up](docs/SUBMISSION.md) (requirements checklist, story, reusable pattern).
+
 More detail: [Architecture](docs/architecture.md) · [Challenge alignment](docs/challenge-alignment.md) ·
 [Demo script](docs/demo-script.md) · [Review and test log](docs/REVIEW.md)
 
