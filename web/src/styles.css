@@ -326,3 +326,6 @@ a.btn { display: inline-flex; align-items: center; gap: 6px; text-decoration: no
 .group-rail { background: rgba(10, 22, 18, 0.72); border: 1px solid var(--line); border-radius: 8px; backdrop-filter: blur(8px); padding: 6px 4px; }
 .group-rail button { text-shadow: none; }
 .lens-label { font-size: 0.875rem; font-weight: 600; color: var(--ink-900); background: var(--lens-5); padding: 5px 14px; border-radius: 999px; }
+/* Long unbroken values (e.g. recorder IDs, dataset names) must wrap instead of widening the grid. */
+.panel dl { grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); }
+.panel dt, .panel dd { min-width: 0; overflow-wrap: anywhere; }
