@@ -8,7 +8,7 @@ GBIF snapshot in the Registry of Open Data on AWS and Amazon Location Service.**
 | Live map (AWS) | https://d2za8aq0bl0uib.cloudfront.net |
 | Live map (Vercel mirror, same app and data) | https://wildscope.vercel.app |
 | Public code | https://github.com/SYMOIZ/wildscope (MIT) |
-| Demo video (< 3 min) | **[ADD YOUTUBE/VIMEO LINK BEFORE SUBMITTING]** (script: [demo-script.md](demo-script.md)) |
+| Demo video (< 3 min) | **[ADD YOUTUBE/VIMEO LINK BEFORE SUBMITTING]** (script: [demo-script.md](docs/demo-script.md)) |
 | Dataset | GBIF occurrence snapshot `2026-10-01`, `s3://gbif-open-data-us-east-1/` (Registry of Open Data on AWS) |
 | AWS services | Amazon Location Service (Maps v2 + Places v2), Amazon S3, Amazon CloudFront, Amazon API Gateway, AWS Lambda, Amazon CloudWatch, AWS Budgets, AWS IAM, AWS CloudFormation |
 
@@ -52,12 +52,12 @@ exactly how many records each quality rule removed.
 
 | Requirement (from the rules) | Status | Evidence |
 |---|---|---|
-| The dataset you started with and what is in it | ✅ | §1, §4, [README "Dataset"](../README.md#dataset), Data notes panel in the app |
-| How you put it on the map, the AWS location or data service used and why | ✅ | §1, §5, [architecture.md](architecture.md) |
-| At least one AWS service in the app or data pipeline | ✅ | Nine AWS services, all in [`infra/wildscope.yaml`](../infra/wildscope.yaml), deployed to us-east-1 |
+| The dataset you started with and what is in it | ✅ | §1, §4, [README "Dataset"](README.md#dataset), Data notes panel in the app |
+| How you put it on the map, the AWS location or data service used and why | ✅ | §1, §5, [architecture.md](docs/architecture.md) |
+| At least one AWS service in the app or data pipeline | ✅ | Nine AWS services, all in [`infra/wildscope.yaml`](infra/wildscope.yaml), deployed to us-east-1 |
 | Link to the live map | ✅ | https://d2za8aq0bl0uib.cloudfront.net (and https://wildscope.vercel.app) |
 | Public code repository (encouraged) | ✅ | https://github.com/SYMOIZ/wildscope |
-| Short (< 3 min) public demo video in the "demo" field | ⚠️ **To do** | Script and shot list ready: [demo-script.md](demo-script.md) |
+| Short (< 3 min) public demo video in the "demo" field | ⚠️ **To do** | Script and shot list ready: [demo-script.md](docs/demo-script.md) |
 | Previously unpublished project | Entrant to confirm | First commit 2026-10-31, during the challenge window |
 | Real dataset you have the right to use; nothing personal or sensitive | ✅ | Public GBIF data; CC0/CC BY records only; photos only when the image is CC0/CC BY, credited; no personal data collected |
 
@@ -172,7 +172,7 @@ Deploy: `bash scripts/deploy.sh` (CloudFormation, app, data) and `bash scripts/d
   a security-header consistency check, and a wording lint that enforces the honesty rules.
 - **Security:** private S3 behind Origin Access Control, verified CSP/HSTS/X-Frame-Options/Referrer-
   Policy headers, a referrer- and action-restricted map key, API throttling, a 5xx alarm and a budget.
-- **Production bugs fixed at the root**, each documented in [REVIEW.md](REVIEW.md): stale mixed caches,
+- **Production bugs fixed at the root**, each documented in [REVIEW.md](docs/REVIEW.md): stale mixed caches,
   a 97% data loss from an accuracy filter, a WebGL context leak, an over-sensitive basemap fallback.
 
 ### Usefulness and impact (25%)
@@ -182,7 +182,7 @@ Deploy: `bash scripts/deploy.sh` (CloudFormation, app, data) and `bash scripts/d
 - Analytics from real data at every level: cell summaries (records, species, datasets, decades, groups,
   top species, data coverage) and live "records in view" (top species, IUCN categories, classes).
 - Fully reusable: MIT code, CloudFormation, one-command deploy, documented architecture
-  ([architecture.md](architecture.md)) and the patterns in §5.
+  ([architecture.md](docs/architecture.md)) and the patterns in §5.
 
 ### Creativity and storytelling (25%)
 
@@ -199,10 +199,10 @@ Deploy: `bash scripts/deploy.sh` (CloudFormation, app, data) and `bash scripts/d
 
 | | |
 |---|---|
-| ![Global](screenshots/01-global-view.jpg) Global H3 cells | ![Regional](screenshots/02-regional-view-britain-all-animals.jpg) Regional cells over Britain |
-| ![Lahore](screenshots/03-local-view-birds-lahore.jpg) Birds around Lahore | ![London](screenshots/04-local-view-london-density-and-clusters.jpg) London: density dots and clusters |
-| ![Record](screenshots/05-record-card-with-photo.jpg) Record card with credited photo | ![Species](screenshots/06-species-mode-larus-fuscus.jpg) Species mode |
-| ![Analytics](screenshots/08-records-in-view-analytics-london-1990s.jpg) Records in view, 1990s | ![Cell](screenshots/09-cell-summary-england.jpg) Cell summary |
+| ![Global](docs/screenshots/01-global-view.jpg) Global H3 cells | ![Regional](docs/screenshots/02-regional-view-britain-all-animals.jpg) Regional cells over Britain |
+| ![Lahore](docs/screenshots/03-local-view-birds-lahore.jpg) Birds around Lahore | ![London](docs/screenshots/04-local-view-london-density-and-clusters.jpg) London: density dots and clusters |
+| ![Record](docs/screenshots/05-record-card-with-photo.jpg) Record card with credited photo | ![Species](docs/screenshots/06-species-mode-larus-fuscus.jpg) Species mode |
+| ![Analytics](docs/screenshots/08-records-in-view-analytics-london-1990s.jpg) Records in view, 1990s | ![Cell](docs/screenshots/09-cell-summary-england.jpg) Cell summary |
 
 ---
 
@@ -220,4 +220,4 @@ Deploy: `bash scripts/deploy.sh` (CloudFormation, app, data) and `bash scripts/d
 GBIF.org (CC0 and CC BY 4.0 records; snapshot citation in the app's Data notes) · Catalogue of Life via
 ChecklistBank (CC BY 4.0) · Amazon Location Service (data-provider terms apply) · Natural Earth
 (fallback imagery) · CesiumJS, H3, h3-js (Apache-2.0) · DuckDB, React, Vite (MIT). Full list:
-[THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
